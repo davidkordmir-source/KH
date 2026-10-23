@@ -1,55 +1,118 @@
 import { spawn } from 'node:child_process';
+import { mkdirSync, createWriteStream } from 'node:fs';
+import net from 'node:net';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
-const port = Number(process.env.PORT || 3001);
-if (Number(process.versions.node.split('.')[0]) < 24) {
-  console.error('Dideban requires Node.js 24 or newer: https://nodejs.org/');
-  process.exit(1);
-}
-if (!Number.isInteger(port) || port < 1 || port > 65535) {
-  console.error('PORT must be a number between 1 and 65535.');
-  process.exit(1);
-}
-const address = `http://127.0.0.1:${port}`;
-const server = spawn(process.execPath, ['--env-file-if-exists=.env', 'server/index.mjs'], {
-  cwd: root, stdio: 'inherit', env: process.env,
-});
-let finished = false;
-server.once('error', () => {
-  finished = true;
-  console.error('Could not start Dideban. Check that Node.js is installed.');
-  process.exitCode = 1;
-});
-server.once('exit', code => {
-  finished = true;
-  process.exitCode = code ?? 1;
-});
-for (const signal of ['SIGINT', 'SIGTERM']) {
-  process.on(signal, () => { server.kill(signal); });
+
+export function desktopPaths(directory, environment = process.env, platform = process.platform) {
+  const paths = platform === 'win32' ? path.win32 : path;
+  const state = platform === 'win32'
+    ? paths.join(environment.LOCALAPPDATA || paths.join(os.homedir(), 'AppData', 'Local'), 'Dideban')
+    : paths.join(directory, '.data');
+  return {
+    data: environment.DATA_DIR ? paths.resolve(directory, environment.DATA_DIR) : platform === 'win32' ? paths.join(state, 'data') : state,
+    log: paths.join(state, 'startup.log'),
+  };
 }
 
-let ready = false;
-for (let attempt = 0; attempt < 40 && !finished; attempt++) {
-  try {
-    const response = await fetch(`${address}/api/health`, { signal: AbortSignal.timeout(1000) });
-    const health = await response.json();
-    if (response.ok && health.status === 'ok' && health.storage === 'sqlite') { ready = true; break; }
-  } catch { /* Wait for the local application to start. */ }
-  await new Promise(resolve => setTimeout(resolve, 250));
+async function portIsFree(port) {
+  return new Promise((resolve, reject) => {
+    const probe = net.createServer();
+    probe.once('error', error => error.code === 'EADDRINUSE' ? resolve(false) : reject(error));
+    probe.listen(port, '127.0.0.1', () => probe.close(error => error ? reject(error) : resolve(true)));
+  });
 }
-if (ready && !finished) {
-  console.log(`\nDideban is ready: ${address}\nKeep this window open. Press Ctrl+C to stop.\n`);
-  if (process.env.DIDEBAN_NO_BROWSER !== '1') {
-    const command = process.platform === 'win32' ? 'cmd.exe' : process.platform === 'darwin' ? 'open' : 'xdg-open';
-    const args = process.platform === 'win32' ? ['/d', '/c', 'start', '', address] : [address];
-    const opener = spawn(command, args, { detached: true, stdio: 'ignore' });
-    opener.on('error', () => console.log(`Open ${address} in your browser.`));
-    opener.unref();
+
+export async function selectPort(value, preferred = 3001) {
+  const explicit = value !== undefined && value !== '';
+  const port = explicit ? Number(value) : preferred;
+  if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('PORT must be a number between 1 and 65535.');
+  if (await portIsFree(port)) return port;
+  if (explicit) throw new Error(`Port ${port} is already in use. Close the other application or remove PORT from .env.`);
+  // Let the operating system choose a free port; the child reports the exact port.
+  return 0;
+}
+
+export function browserCommand(platform, address) {
+  if (!/^http:\/\/127\.0\.0\.1:\d+$/.test(address)) throw new Error('Invalid local application address.');
+  if (platform === 'win32') return { command: 'cmd.exe', args: ['/d', '/s', '/c', `start "" "${address}"`], windowsVerbatimArguments: true };
+  return { command: platform === 'darwin' ? 'open' : 'xdg-open', args: [address] };
+}
+
+export async function runLauncher({ directory = root, environment = process.env, platform = process.platform } = {}) {
+  if (Number(process.versions.node.split('.')[0]) < 24) throw new Error('Dideban requires Node.js 24 or newer.');
+  const locations = desktopPaths(directory, environment, platform);
+  mkdirSync(path.dirname(locations.log), { recursive: true, mode: 0o700 });
+  const log = createWriteStream(locations.log, { flags: 'w', mode: 0o600 });
+  log.on('error', () => process.stderr.write(`Could not write the startup log at ${locations.log}.\n`));
+  const write = (message, error = false) => {
+    const line = `${message}\n`;
+    log.write(line);
+    (error ? process.stderr : process.stdout).write(line);
+  };
+  write('Starting Dideban...');
+  write(`Startup log: ${locations.log}`);
+  let server;
+  let interrupted = false;
+  const stop = signal => { interrupted = true; server?.kill(signal); };
+  const stopInterrupt = () => stop('SIGINT');
+  const stopTerminate = () => stop('SIGTERM');
+  try {
+    const port = await selectPort(environment.PORT);
+    server = spawn(process.execPath, ['--env-file-if-exists=.env', 'server/index.mjs'], {
+      cwd: directory,
+      stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
+      env: { ...environment, HOST: '127.0.0.1', PORT: String(port), DATA_DIR: locations.data },
+    });
+    server.stdout.on('data', chunk => { process.stdout.write(chunk); log.write(chunk); });
+    server.stderr.on('data', chunk => { process.stderr.write(chunk); log.write(chunk); });
+    const completed = new Promise(resolve => server.once('close', (code, signal) => resolve({ code, signal })));
+    process.on('SIGINT', stopInterrupt);
+    process.on('SIGTERM', stopTerminate);
+    const ready = await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('Startup took too long. Check the startup log.')), 15_000);
+      const cleanup = () => { clearTimeout(timer); server.off('message', message); server.off('error', failed); server.off('exit', exited); };
+      const failed = error => { cleanup(); reject(error); };
+      const exited = () => failed(new Error('The application could not start. Check the startup log above.'));
+      const message = value => {
+        if (value?.type === 'dideban-error') return failed(new Error(value.code === 'EADDRINUSE' ? 'The selected port was taken before startup. Run Dideban again.' : 'The local server could not start. Check the startup log.'));
+        if (value?.type !== 'dideban-ready') return;
+        if (!Number.isInteger(value.port) || value.port < 1 || value.port > 65535) return failed(new Error('The server returned an invalid port.'));
+        cleanup(); resolve(value.port);
+      };
+      server.on('message', message);
+      server.once('error', failed);
+      server.once('exit', exited);
+    });
+    const address = `http://127.0.0.1:${ready}`;
+    const response = await fetch(`${address}/api/health`, { signal: AbortSignal.timeout(3000) });
+    const health = await response.json();
+    if (!response.ok || health.status !== 'ok' || health.storage !== 'sqlite') throw new Error('The application did not pass its startup check.');
+    write(`\nDideban is ready: ${address}\nKeep this window open. Press Ctrl+C to stop.\n`);
+    if (environment.DIDEBAN_NO_BROWSER !== '1') {
+      const openerConfig = browserCommand(platform, address);
+      const opener = spawn(openerConfig.command, openerConfig.args, { detached: true, stdio: 'ignore', windowsVerbatimArguments: openerConfig.windowsVerbatimArguments });
+      opener.on('error', () => write(`Open ${address} in your browser.`));
+      opener.on('exit', code => { if (code) write(`Open ${address} in your browser.`); });
+      opener.unref();
+    }
+    const outcome = await completed;
+    if (outcome.code && !interrupted) throw new Error(`Dideban stopped unexpectedly (exit ${outcome.code}). Check the startup log.`);
+  } catch (error) {
+    write(`\nCould not start Dideban: ${error.message}`, true);
+    server?.kill('SIGTERM');
+    throw error;
+  } finally {
+    process.off('SIGINT', stopInterrupt);
+    process.off('SIGTERM', stopTerminate);
+    log.end();
   }
-} else if (!finished) {
-  console.error('Dideban did not start in time. Check the messages above.');
-  server.kill('SIGTERM');
-  process.exitCode = 1;
+}
+
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  try { await runLauncher(); }
+  catch { process.exitCode = 1; }
 }

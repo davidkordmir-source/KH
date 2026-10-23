@@ -30,12 +30,13 @@ const platformMeta: Record<Platform, { name: string; english: string; color: str
   linkedin: { name: 'لینکدین', english: 'LinkedIn', color: '#1877a9', supported: true, description: 'پست‌های سازمانی با توکن و مجوزهای تأییدشدهٔ Community Management.' },
 };
 
-async function api<T = unknown>(path: string, method = 'GET', body?: unknown): Promise<T> {
+async function api<T = unknown>(path: string, method = 'GET', body?: unknown, signal?: AbortSignal): Promise<T> {
   const response = await fetch(`/api${path}`, {
     method, headers: ['POST', 'PUT', 'PATCH'].includes(method) ? { 'Content-Type': 'application/json' } : undefined,
     body: body === undefined ? (['POST', 'PUT', 'PATCH'].includes(method) ? '{}' : undefined) : JSON.stringify(body),
+    signal,
   });
-  const data = await response.json().catch(() => null);
+  const data = await response.json().catch(error => { if (signal?.aborted) throw error; return null; });
   if (!response.ok) throw new Error(typeof data?.error === 'string' ? data.error : typeof data?.message === 'string' ? data.message : 'ارتباط با سرور برقرار نشد. دوباره تلاش کنید.');
   return data as T;
 }
@@ -78,18 +79,73 @@ function App() {
   const [keywordInput, setKeywordInput] = useState('');
   const [showAllErrors, setShowAllErrors] = useState(false);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const mounted = useRef(false);
+  const dashboardRequest = useRef<AbortController | null>(null);
+  const dashboardVersion = useRef(0);
+  const activeMutations = useRef(0);
+  const syncInProgress = useRef(false);
+  const articleCount = useRef(data.articles.length);
+  articleCount.current = data.articles.length;
 
   const notify = (text: string, error = false) => {
     setToast({ text, error });
     clearTimeout(toastTimer.current);
     toastTimer.current = setTimeout(() => setToast(null), 5500);
   };
-  async function load() {
-    try { const next = await api<Dashboard>('/dashboard'); setData(next); setLoadError(''); }
-    catch (error) { setLoadError((error as Error).message); }
-    finally { setLoading(false); }
+  function cancelDashboardRead() {
+    dashboardVersion.current += 1;
+    dashboardRequest.current?.abort();
+    dashboardRequest.current = null;
   }
-  useEffect(() => { void load(); return () => clearTimeout(toastTimer.current); }, []);
+  async function load(background = false) {
+    if (background && (document.visibilityState !== 'visible' || activeMutations.current > 0 || syncInProgress.current || dashboardRequest.current)) return;
+    cancelDashboardRead();
+    const version = dashboardVersion.current;
+    const controller = new AbortController();
+    dashboardRequest.current = controller;
+    const timeout = setTimeout(() => controller.abort(), 15_000);
+    try {
+      const next = await api<Dashboard>('/dashboard', 'GET', undefined, controller.signal);
+      if (mounted.current && version === dashboardVersion.current && (!background || document.visibilityState === 'visible')) {
+        setData(next); setLoadError('');
+      }
+    } catch (error) {
+      if (!controller.signal.aborted && mounted.current && version === dashboardVersion.current) setLoadError((error as Error).message);
+    } finally {
+      clearTimeout(timeout);
+      if (version === dashboardVersion.current) {
+        dashboardRequest.current = null;
+        if (mounted.current) setLoading(false);
+      }
+    }
+  }
+  useEffect(() => {
+    mounted.current = true;
+    void load();
+    return () => { mounted.current = false; cancelDashboardRead(); clearTimeout(toastTimer.current); };
+  }, []);
+  useEffect(() => {
+    let disposed = false;
+    let polling = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const schedule = () => {
+      if (!disposed && document.visibilityState === 'visible') timer = setTimeout(poll, articleCount.current === 0 ? 3_000 : 10_000);
+    };
+    async function poll() {
+      if (disposed || polling) return;
+      polling = true;
+      clearTimeout(timer);
+      try { await load(true); }
+      finally { polling = false; schedule(); }
+    }
+    const onVisibilityChange = () => {
+      clearTimeout(timer);
+      if (document.visibilityState === 'visible') void poll();
+    };
+    schedule();
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => { disposed = true; clearTimeout(timer); document.removeEventListener('visibilitychange', onVisibilityChange); };
+  }, []);
   useEffect(() => { setConfirmDelete(null); setMenuOpen(false); }, [page]);
   useEffect(() => {
     if (!modal) return;
@@ -121,22 +177,27 @@ function App() {
   }, [data.articles, data.keywords, page, category, language, sourceFilter, period, search, sort]);
 
   async function sync() {
-    if (syncing) return;
+    if (syncInProgress.current) return;
+    syncInProgress.current = true;
+    cancelDashboardRead();
+    const version = dashboardVersion.current;
     setSyncing(true);
     try {
       const next = await api<Dashboard>('/sync', 'POST');
-      setData(next); setLoadError('');
+      if (mounted.current && version === dashboardVersion.current) { setData(next); setLoadError(''); }
       if (next.syncErrors.length) notify(`جمع‌آوری تمام شد؛ ${number(next.syncErrors.length)} منبع با خطا روبه‌رو شد. جزئیات را در وضعیت منابع ببینید.`, true);
       else notify('منابع با موفقیت به‌روز شدند.');
     } catch (error) { notify((error as Error).message, true); }
-    finally { setSyncing(false); }
+    finally { syncInProgress.current = false; setSyncing(false); }
   }
 
   async function mutate(path: string, method: string, body: unknown, success: string, busyKey = path) {
+    activeMutations.current += 1;
+    cancelDashboardRead();
     setBusy(busyKey);
     try { await api(path, method, body); await load(); if (success) notify(success); return true; }
     catch (error) { notify((error as Error).message, true); return false; }
-    finally { setBusy(null); }
+    finally { activeMutations.current -= 1; setBusy(null); }
   }
 
   async function saveArticle(article: Article) {

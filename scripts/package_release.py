@@ -25,8 +25,12 @@ with ZipFile(archive, 'w', compression=ZIP_DEFLATED, compresslevel=9) as bundle:
         info.compress_type = ZIP_DEFLATED
         info.create_system = 3
         info.external_attr = (0o100755 if file.name == 'start.sh' else 0o100644) << 16
-        bundle.writestr(info, file.read_bytes())
+        payload = file.read_bytes()
+        if file.suffix == '.cmd':
+            payload = file.read_text().replace('\r\n', '\n').replace('\n', '\r\n').encode('utf-8')
+        bundle.writestr(info, payload)
 digest = hashlib.sha256(archive.read_bytes()).hexdigest()
-(output / 'SHA256SUMS.txt').write_text(f'{digest}  {archive.name}\n')
+sums = ''.join(f'{hashlib.sha256(file.read_bytes()).hexdigest()}  {file.name}\n' for file in sorted(output.glob('*.zip')))
+(output / 'SHA256SUMS.txt').write_text(sums)
 print(f'{archive.name}: {archive.stat().st_size:,} bytes, {len(files)} files')
 print(f'SHA-256: {digest}')

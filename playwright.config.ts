@@ -9,15 +9,18 @@ export default defineConfig({
   workers: 1,
   timeout: 30_000,
   use: {
-    baseURL: 'http://127.0.0.1:5173',
+    baseURL: 'http://127.0.0.1:34017',
     viewport: { width: 1440, height: 1000 },
     launchOptions: existsSync('/usr/bin/chromium') ? { executablePath: '/usr/bin/chromium', args: ['--no-sandbox'] } : {},
     trace: 'retain-on-failure',
   },
   webServer: {
-    command: 'npm run dev',
-    url: 'http://127.0.0.1:5173',
+    command: 'node node_modules/concurrently/dist/bin/index.js --kill-others "node server/index.mjs" "node node_modules/vite/bin/vite.js"',
+    url: 'http://127.0.0.1:34017',
     reuseExistingServer: false,
-    env: { AUTO_SYNC: '0', DATA_DIR: mkdtempSync(path.join(tmpdir(), 'dideban-e2e-')) },
+    env: {
+      AUTO_SYNC: '0', DATA_DIR: mkdtempSync(path.join(tmpdir(), 'dideban-e2e-')),
+      PORT: '34018', DEV_PORT: '34017', API_PROXY_TARGET: 'http://127.0.0.1:34018',
+    },
   },
 });
