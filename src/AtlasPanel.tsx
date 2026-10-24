@@ -13,9 +13,9 @@ type AtlasArticle = {
 type Country = { code: string; name: string };
 type FeatureCollection = Parameters<typeof L.geoJSON>[0];
 const faNumber = (value: number) => value.toLocaleString('fa-IR');
-const displayNames = new Intl.DisplayNames(['fa'], { type: 'region' });
+const displayNames = typeof Intl.DisplayNames === 'function' ? new Intl.DisplayNames(['fa'], { type: 'region' }) : null;
 const countryName = (code: string, fallback: string) => {
-  try { return displayNames.of(code) || fallback; } catch { return fallback; }
+  try { return displayNames?.of(code) || fallback; } catch { return fallback; }
 };
 const featureCode = (properties: Record<string, unknown> | null | undefined) => {
   for (const key of ['ISO_A2_EH', 'ISO_A2']) {

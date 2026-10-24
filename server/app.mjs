@@ -19,6 +19,7 @@ const route = handler => (req, res, next) => Promise.resolve(handler(req, res)).
 export function createApp({ directory = path.resolve('.data'), distDirectory = path.resolve('dist'), fetcher = safeFetch, urlValidator = validatePublicUrl, store = new Store(directory) } = {}) {
   const app = express();
   app.disable('x-powered-by');
+  app.disable('etag');
   const allowedHosts = new Set(['localhost', '127.0.0.1', '[::1]', ...(process.env.APP_ALLOWED_HOSTS || '').split(',').map(value => value.trim().toLowerCase()).filter(Boolean)]);
   app.use((req, res, next) => {
     if (!allowedHosts.has(req.hostname.toLowerCase())) return res.status(403).json({ error: 'نام میزبان برای این برنامه مجاز نیست.' });
@@ -340,8 +341,16 @@ export function createApp({ directory = path.resolve('.data'), distDirectory = p
     res.json({ ok: true });
   });
   app.use('/api', (_req, res) => res.status(404).json({ error: 'مسیر API پیدا نشد.' }));
-  app.use(express.static(distDirectory));
-  app.get('/{*path}', (_req, res, next) => res.sendFile(path.join(distDirectory, 'index.html'), error => error && next(error)));
+  // ZIP releases can preserve identical size/mtime while their asset hashes change.
+  // Never validate the entry document using a size/mtime-based weak ETag.
+  const sendEntry = (_req, res, next) => {
+    res.setHeader('Cache-Control', 'no-store');
+    res.sendFile(path.join(distDirectory, 'index.html'), { etag: false, lastModified: false, cacheControl: false }, error => error && next(error));
+  };
+  app.get(['/', '/index.html'], sendEntry);
+  app.use(express.static(distDirectory, { etag: false, lastModified: false, setHeaders(res) { res.setHeader('Cache-Control', 'no-cache'); } }));
+  app.use('/assets', (_req, res) => res.status(404).type('text').send('Application asset missing. Refresh the page or extract the complete download.'));
+  app.get('/{*path}', sendEntry);
   app.use((error, _req, res, _next) => {
     if (error.type === 'entity.parse.failed') return res.status(400).json({ error: 'ساختار درخواست JSON معتبر نیست.' });
     if (error.type === 'entity.too.large') return res.status(413).json({ error: 'حجم درخواست بیش از حد مجاز است.' });

@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { mkdirSync, createWriteStream } from 'node:fs';
+import { mkdirSync, createWriteStream, readFileSync } from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
@@ -37,7 +37,7 @@ export async function selectPort(value, preferred = 3001) {
 }
 
 export function browserCommand(platform, address) {
-  if (!/^http:\/\/127\.0\.0\.1:\d+$/.test(address)) throw new Error('Invalid local application address.');
+  if (!/^http:\/\/127\.0\.0\.1:\d+(?:\/\?v=\d+\.\d+\.\d+)?$/.test(address)) throw new Error('Invalid local application address.');
   if (platform === 'win32') return { command: 'cmd.exe', args: ['/d', '/s', '/c', `start "" "${address}"`], windowsVerbatimArguments: true };
   return { command: platform === 'darwin' ? 'open' : 'xdg-open', args: [address] };
 }
@@ -91,9 +91,20 @@ export async function runLauncher({ directory = root, environment = process.env,
     const response = await fetch(`${address}/api/health`, { signal: AbortSignal.timeout(3000) });
     const health = await response.json();
     if (!response.ok || health.status !== 'ok' || health.storage !== 'sqlite') throw new Error('The application did not pass its startup check.');
+    const entry = await fetch(address + '/', { cache: 'no-store', signal: AbortSignal.timeout(3000) });
+    const html = await entry.text();
+    const assets = [...html.matchAll(/(?:src|href)="(\/assets\/[^"<>]+)"/g)].map(match => match[1]);
+    if (!entry.ok || !assets.length) throw new Error('Application page is missing. Extract the complete ZIP into a new folder.');
+    for (const asset of assets) {
+      const file = await fetch(address + asset, { signal: AbortSignal.timeout(3000) });
+      await file.body?.cancel();
+      if (!file.ok || file.headers.get('content-type')?.includes('text/html')) throw new Error('Application files are incomplete. Extract the complete ZIP into a new folder.');
+    }
+    const version = JSON.parse(readFileSync(path.join(directory, 'package.json'), 'utf8')).version;
+    const openAddress = /^\d+\.\d+\.\d+$/.test(version) ? `${address}/?v=${version}` : address;
     write(`\nDideban is ready: ${address}\nKeep this window open. Press Ctrl+C to stop.\n`);
     if (environment.DIDEBAN_NO_BROWSER !== '1') {
-      const openerConfig = browserCommand(platform, address);
+      const openerConfig = browserCommand(platform, openAddress);
       const opener = spawn(openerConfig.command, openerConfig.args, { detached: true, stdio: 'ignore', windowsVerbatimArguments: openerConfig.windowsVerbatimArguments });
       opener.on('error', () => write(`Open ${address} in your browser.`));
       opener.on('exit', code => { if (code) write(`Open ${address} in your browser.`); });

@@ -64,6 +64,8 @@ function PlatformIcon({ platform, size = 21 }: { platform: Platform; size?: numb
   return <span className="x-brand" style={{ fontSize: size }}>𝕏</span>;
 }
 
+function readSortPreference() { try { return localStorage.getItem('dideban-news-sort') || 'latest'; } catch { return 'latest'; } }
+
 function App() {
   const [data, setData] = useState<Dashboard>(emptyDashboard);
   const [page, setPage] = useState<Page>('news');
@@ -77,7 +79,7 @@ function App() {
   const [language, setLanguage] = useState('all');
   const [sourceFilter, setSourceFilter] = useState('all');
   const [period, setPeriod] = useState('all');
-  const [sort, setSort] = useState(() => localStorage.getItem('dideban-news-sort') || 'latest');
+  const [sort, setSort] = useState(() => readSortPreference());
   const [modal, setModal] = useState<'source' | Platform | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
@@ -194,7 +196,7 @@ function App() {
     return () => document.removeEventListener('keydown', onKey);
   }, [modal]);
 
-  useEffect(() => { localStorage.setItem('dideban-news-sort', sort); }, [sort]);
+  useEffect(() => { try { localStorage.setItem('dideban-news-sort', sort); } catch { /* Optional browser preferences can be blocked. */ } }, [sort]);
 
   const connections = (Object.keys(platformMeta) as Platform[]).map(platform => data.connections.find(item => item.platform === platform) ?? { platform, connected: false, label: null, capability: '' });
   const savedCount = page === 'saved' && savedArticles ? savedArticles.length : data.articles.filter(article => article.saved).length;
