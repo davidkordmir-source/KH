@@ -1,0 +1,10 @@
+import { readFileSync,writeFileSync } from 'node:fs';
+import { createHash,sign } from 'node:crypto';
+import path from 'node:path';
+const root=path.resolve(import.meta.dirname,'..'),version=JSON.parse(readFileSync(path.join(root,'package.json'),'utf8')).version;
+if(!process.env.DIDEBAN_UPDATE_PRIVATE_KEY_FILE)throw new Error('Set DIDEBAN_UPDATE_PRIVATE_KEY_FILE to the private Ed25519 signing key. Never commit that key.');
+const name=`Dideban-v${version}-Setup-Windows-x64.exe`,bytes=readFileSync(path.join(root,'downloads',name));
+const payload={format:1,version,createdAt:new Date().toISOString(),windows:{url:`https://raw.githubusercontent.com/davidkordmir-source/KH/v${version}/downloads/${name}`,size:bytes.length,sha256:createHash('sha256').update(bytes).digest('hex')}};
+const encoded=Buffer.from(JSON.stringify(payload)),signature=sign(null,encoded,readFileSync(process.env.DIDEBAN_UPDATE_PRIVATE_KEY_FILE));
+writeFileSync(path.join(root,'updates','latest.json'),JSON.stringify({payload:encoded.toString('base64'),signature:signature.toString('base64')},null,2)+'\n');
+console.log(`Signed update manifest for ${version}, ${bytes.length} bytes; no private key included.`);

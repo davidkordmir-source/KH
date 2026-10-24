@@ -24,6 +24,16 @@ export function normalizeArticleUrl(value) {
   } catch { return null; }
 }
 
+export function extractReferences(html,articleUrl) {
+  const found=[];
+  for(const match of String(html||'').slice(0,200000).matchAll(/<a\b([^>]*)>([\s\S]*?)<\/a>/gi)) {
+    const attributes=attributesFor(match[1]),url=safeMediaUrl(attributes.href,articleUrl),label=cleanText(match[2]).slice(0,180);
+    if(!url||url===articleUrl||!label||found.some(item=>item.url===url))continue;
+    found.push({url,label,basis:'publisher-link'});if(found.length>=20)break;
+  }
+  return found;
+}
+
 export function discoverFeedUrl(html, websiteUrl) {
   for (const tag of html.match(/<link\b[^>]*>/gi) || []) {
     const attributes = {};
@@ -143,13 +153,14 @@ export function parseFeed(xml, source, now = new Date()) {
     seen.add(url);
     const summary = cleanText(item.description || item.summary || item['content:encoded'] || item.content).slice(0, 1600);
     const fullText = cleanText(item['content:encoded'] || item.content || item.description || item.summary).slice(0, 60000);
+    const references=extractReferences([item.description,item.summary,item['content:encoded'],item.content].map(text).join('\n'),url);
     const rawDate = text(item.pubDate || item.published || item.updated || item['dc:date']);
     const date = new Date(rawDate);
     const publishedAtKnown = !Number.isNaN(date.getTime());
     const media = extractFeedMedia(item, url);
     const imageUrl = media.find(entry => entry.type === 'image')?.url || media.find(entry => entry.poster)?.poster || null;
     return [{
-      id: createHash('sha256').update(url).digest('hex').slice(0, 24), title, summary, fullText, textScope: 'publisher-feed', url, imageUrl, media, sourceIconUrl,
+      id: createHash('sha256').update(url).digest('hex').slice(0, 24), title, summary, fullText, references, textScope: 'publisher-feed', url, imageUrl, media, sourceIconUrl,
       sourceId: source.id, sourceName: source.name, platform: source.platform || 'rss',
       publishedAt: publishedAtKnown ? date.toISOString() : now.toISOString(), publishedAtKnown,
       category: categoryFor(`${title} ${summary} ${list(item.category).map(text).join(' ')}`),

@@ -3,6 +3,7 @@ import { normalizeStoryTitle } from './enrichment.mjs';
 import { safeMediaUrl } from './feeds.mjs';
 import { SOURCE_CATALOG, OFFICIAL_WEBSITES } from './catalog.mjs';
 import { createCalendarService } from './calendar.mjs';
+import { companyFields } from './company.mjs';
 
 const hash = text => createHash('sha256').update(text).digest('hex').slice(0, 24);
 const stop = new Set('the a an and or of to in on for with from is are was at as by this that says said new news live report latest و در به از با برای که این آن را یک خبر گزارش تازه فوری است شد می ها'.split(' '));
@@ -17,15 +18,15 @@ export function similarHeadlines(a, b) {
   return common >= 4 ? common / new Set([...left, ...right]).size : 0;
 }
 
-export function groupEvents(articles, sources = []) {
+export function groupEvents(articles, sources = [], options = {}) {
   const groups = [], sourceMap = new Map(sources.map(s => [s.id, s]));
   for (const article of [...articles].sort((a,b) => a.publishedAt.localeCompare(b.publishedAt) || a.id.localeCompare(b.id))) {
-    let group = groups.find(item => article.publishedAtKnown !== false && item.articles[0].publishedAtKnown !== false && Math.abs(Date.parse(article.publishedAt) - Date.parse(item.firstAt)) <= 48 * 3600000 && similarHeadlines(item.title, article.title) >= 0.58);
+    let group = groups.find(item => article.publishedAtKnown !== false && item.articles[0].publishedAtKnown !== false && Math.abs(Date.parse(article.publishedAt) - Date.parse(item.firstAt)) <= 48 * 3600000 && (options.compare?options.compare(item.articles[0],article):similarHeadlines(item.title, article.title)) >= 0.58);
     if (!group) { group = { id: hash(article.id), title: article.title, firstAt: article.publishedAt, lastAt: article.publishedAt, articles: [] }; groups.push(group); }
     group.articles.push(article); group.lastAt = article.publishedAt;
   }
   return groups.map(group => ({ ...group, count: group.articles.length, sourceCount: new Set(group.articles.map(a => sourceMap.get(a.sourceId)?.publisher || new URL(a.url).hostname.replace(/^www\./,''))).size,
-    method: 'lexical-similarity', independentConfirmation: false })).sort((a,b) => b.lastAt.localeCompare(a.lastAt));
+    method: options.method || 'lexical-similarity', independentConfirmation: false })).sort((a,b) => b.lastAt.localeCompare(a.lastAt));
 }
 
 const trimmed = (value, maximum = 200) => typeof value === 'string' ? value.trim().slice(0,maximum) : '';
@@ -79,14 +80,14 @@ export function createNewsroom({ store, markets, fetcher }) {
     if (!id && profiles.length>=200) throw new Error('حداکثر ۲۰۰ پرونده قابل ثبت است.');
     const links = (Array.isArray(input.links)?input.links:[]).slice(0,12).map(link=>({label:trimmed(link.label,100),url:trimmed(link.url,2000),verified:link.verified===true}));
     if (links.some(link=>!safeMediaUrl(link.url))) throw new Error('پیوند حساب رسمی باید HTTPS عمومی باشد.');
-    const value = {id:id||randomUUID(),name:trimmed(input.name,150),type:['person','organization','company'].includes(input.type)?input.type:'person',country:trimmed(input.country,2).toUpperCase(),aliases:(Array.isArray(input.aliases)?input.aliases:[]).map(a=>trimmed(a,100)).filter(Boolean).slice(0,15),description:trimmed(input.description,3000),links,updatedAt:new Date().toISOString()};
+    const value = {id:id||randomUUID(),name:trimmed(input.name,150),type:['person','organization','company'].includes(input.type)?input.type:'person',country:trimmed(input.country,2).toUpperCase(),aliases:(Array.isArray(input.aliases)?input.aliases:[]).map(a=>trimmed(a,100)).filter(Boolean).slice(0,15),description:trimmed(input.description,3000),links,...companyFields(input),updatedAt:new Date().toISOString()};
     if (!value.name || !validCountry(value.country)) throw new Error('نام و کشور پرونده معتبر نیست.');
     putJson('profiles',value);return value;
   }
   function profileArticles(id) {
     const profile=readJson('profiles').find(p=>p.id===id);if(!profile) throw Object.assign(new Error('پرونده پیدا نشد.'),{status:404});
     const ids=new Map();
-    for(const name of [profile.name,...profile.aliases]) for(const item of store.articles({query:`"${name.replaceAll('"','')}"`,limit:500})) ids.set(item.id,item);
+    for(const name of [profile.name,...profile.aliases,...(profile.leaders||[])]) for(const item of store.articles({query:`"${name.replaceAll('"','')}"`,limit:500})) ids.set(item.id,item);
     return {profile,articles:[...ids.values()].sort((a,b)=>b.publishedAt.localeCompare(a.publishedAt)),scope:'حداکثر ۵۰۰ خبر برای هر نام؛ تطبیق نام در متن، نه احراز هویت خودکار'};
   }
   function putRule(input,id) {

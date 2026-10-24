@@ -15,6 +15,7 @@ files = [root / name for name in (
     'launch.mjs', 'start.sh', 'start-windows.cmd', 'DOWNLOAD-README-fa.txt',
 )]
 files += sorted(p for p in (root / 'server').glob('*.mjs') if not p.name.endswith('.test.mjs'))
+files += sorted(p for p in (root / 'desktop').glob('*') if p.is_file() and p.suffix in {'.pem','.ps1','.vbs','.cmd','.md'} and 'private' not in p.name)
 files += sorted(p for p in (root / 'dist').rglob('*') if p.is_file())
 if not (root / 'dist/index.html').is_file():
     raise SystemExit('Run npm run build before packaging.')
@@ -30,7 +31,7 @@ with ZipFile(archive, 'w', compression=ZIP_DEFLATED, compresslevel=9) as bundle:
             payload = file.read_text().replace('\r\n', '\n').replace('\n', '\r\n').encode('utf-8')
         bundle.writestr(info, payload)
 digest = hashlib.sha256(archive.read_bytes()).hexdigest()
-sums = ''.join(f'{hashlib.sha256(file.read_bytes()).hexdigest()}  {file.name}\n' for file in sorted(output.glob('*.zip')))
+sums = ''.join(f'{hashlib.sha256(file.read_bytes()).hexdigest()}  {file.name}\n' for file in sorted([*output.glob('*.zip'),*output.glob('*.exe')]))
 (output / 'SHA256SUMS.txt').write_text(sums)
 print(f'{archive.name}: {archive.stat().st_size:,} bytes, {len(files)} files')
 print(f'SHA-256: {digest}')

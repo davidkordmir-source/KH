@@ -35,6 +35,7 @@ for filename in ['package.json', 'package-lock.json', 'README.md', '.env.example
 batch = stage / 'start-windows.cmd'
 batch.write_bytes(batch.read_text().replace('\r\n', '\n').replace('\n', '\r\n').encode('utf-8'))
 shutil.copytree(root / 'dist', stage / 'dist')
+shutil.copytree(root / 'desktop',stage / 'desktop',ignore=shutil.ignore_patterns('installer.nsi','*.pfx','*.p12','*private*'))
 (stage / 'server').mkdir()
 for file in (root / 'server').glob('*.mjs'):
     if not file.name.endswith('.test.mjs'):
@@ -71,7 +72,7 @@ with ZipFile(archive, 'w', compression=ZIP_DEFLATED, compresslevel=6) as bundle:
         with file.open('rb') as source, bundle.open(info, 'w') as target:
             shutil.copyfileobj(source, target)
         count += 1
-sums = ''.join(f'{hashlib.sha256(file.read_bytes()).hexdigest()}  {file.name}\n' for file in sorted(output.glob('*.zip')))
+sums = ''.join(f'{hashlib.sha256(file.read_bytes()).hexdigest()}  {file.name}\n' for file in sorted([*output.glob('*.zip'),*output.glob('*.exe')]))
 (output / 'SHA256SUMS.txt').write_text(sums)
 print(f'Windows bundle: {archive.name}, {archive.stat().st_size:,} bytes, {count} files')
 print(f'Clean staging directory: {stage}')

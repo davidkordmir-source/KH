@@ -56,6 +56,10 @@ export class Store {
     this.db.exec('PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;');
     const oldArticles = this.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='articles'").get();
     const oldColumns = oldArticles ? this.db.prepare('PRAGMA table_info(articles)').all().map(column => column.name) : [];
+    if(oldArticles && this.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='research_items'").get() && !this.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='media_transcripts'").get()) {
+      const backup=path.join(directory,'news.pre-v4.sqlite');
+      if(!existsSync(backup)){this.db.prepare('VACUUM INTO ?').run(backup);chmodSync(backup,0o600);}
+    }
     if(oldArticles && oldColumns.includes('fingerprint') && !this.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='research_items'").get()) {
       const backup=path.join(directory,'news.pre-v3.sqlite');
       if(!existsSync(backup)){this.db.prepare('VACUUM INTO ?').run(backup);chmodSync(backup,0o600);}
@@ -113,6 +117,10 @@ export class Store {
       CREATE TABLE IF NOT EXISTS calendar_events(id TEXT PRIMARY KEY,payload TEXT NOT NULL);`);
     this.db.exec('CREATE TABLE IF NOT EXISTS saved_searches(id TEXT PRIMARY KEY,payload TEXT NOT NULL)');
     addColumns('research_items',{primary_url:"TEXT NOT NULL DEFAULT ''"});
+    this.db.exec(`CREATE TABLE IF NOT EXISTS semantic_vectors(article_id TEXT PRIMARY KEY,content_hash TEXT NOT NULL,model TEXT NOT NULL,vector TEXT NOT NULL,indexed_at TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS media_transcripts(id TEXT PRIMARY KEY,payload TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS archive_questions(id TEXT PRIMARY KEY,payload TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS login_sessions(token_hash TEXT PRIMARY KEY,expires_at TEXT NOT NULL,created_at TEXT NOT NULL);`);
     initializeSearch(this);
   }
   close() { this.db.close(); }

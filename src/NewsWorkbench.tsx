@@ -6,8 +6,9 @@ import { dateTime, faNumber, inputDate, request, useResource } from './newsroom-
 import { AlertsDesk, ProfilesDesk, RiskDesk, SourcesDesk } from './NewsroomDesks';
 import { BackupDesk, IntegrationDesk } from './NewsroomSettings';
 import './workbench.css';
+import ResearchLab from './ResearchLab';
 
-type Tab='search'|'events'|'alerts'|'risk'|'profiles'|'media'|'sources'|'backup'|'settings';
+type Tab='search'|'events'|'alerts'|'risk'|'profiles'|'media'|'sources'|'backup'|'settings'|'lab';
 type Source={id:string;name:string};
 export type StoryEvent={id:string;title:string;firstAt:string;lastAt:string;sourceCount:number;count:number;articles:Article[]};
 export function ArticleRows({articles,onSelect,media=false}:{articles:Article[];onSelect:(id:string)=>void;media?:boolean}) {
@@ -24,7 +25,7 @@ function SearchDesk({mode,onSelect,sources}:{mode:'search'|'events'|'media';onSe
   const searches=useResource<{searches:{id:string;name:string;rawFilters:Filters}[]}>('/newsroom/searches',{searches:[]}),folders=useResource<{folders:{folder:string;count:number}[]}>('/newsroom/folders',{folders:[]});
   const parameters=new URLSearchParams(Object.entries(applied).filter(([,value])=>value));
   parameters.set('limit','50');parameters.set('offset',String(offset));
-  const result=useResource<{articles?:Article[];events?:StoryEvent[];scope?:string;total?:number;coverage?:{articleCount:number}}>(mode==='events'?`/newsroom/events?${parameters}`:`/articles?${parameters}`,{});
+  const result=useResource<{articles?:Article[];events?:StoryEvent[];scope?:string;total?:number;coverage?:{articleCount:number}}>(mode==='events'?`/lab/events?${parameters}`:`/articles?${parameters}`,{});
   const set=(key:keyof Filters,value:string)=>setForm(previous=>({...previous,[key]:value}));
   function apply(next=form) {try{const filter={...next,dateFrom:inputDate(next.dateFrom),dateTo:inputDate(next.dateTo)};if(filter.dateFrom&&filter.dateTo&&filter.dateFrom>filter.dateTo)throw new Error('ابتدای بازه باید پیش از انتهای آن باشد.');setApplied(filter);setOffset(0);setError('');}catch(e){setError((e as Error).message);}}
   async function saveSearch() {
@@ -47,9 +48,10 @@ function SearchDesk({mode,onSelect,sources}:{mode:'search'|'events'|'media';onSe
 
 export default function NewsWorkbench({sources,onChanged}:{sources:Source[];onChanged:()=>void}) {
   const [tab,setTab]=useState<Tab>('search'),[selected,setSelected]=useState<string|null>(null);
-  const tabs:{id:Tab;label:string;icon:typeof Search}[]=[{id:'search',label:'جست‌وجو و پژوهش',icon:FileSearch},{id:'events',label:'پروندهٔ رویدادها',icon:Layers3},{id:'alerts',label:'مرکز هشدار',icon:Bell},{id:'risk',label:'ریسک و تقویم بازار',icon:ShieldCheck},{id:'profiles',label:'اشخاص و سازمان‌ها',icon:Users},{id:'media',label:'آرشیو رسانه',icon:Images},{id:'sources',label:'سلامت منابع',icon:Database},{id:'backup',label:'پشتیبان و بازیابی',icon:FolderOpen},{id:'settings',label:'ترجمه و به‌روزرسانی',icon:Settings2}];
+  const tabs:{id:Tab;label:string;icon:typeof Search}[]=[{id:'lab',label:'دستیار و ابزارهای تازه',icon:BookOpen},{id:'search',label:'جست‌وجو و پژوهش',icon:FileSearch},{id:'events',label:'پروندهٔ رویدادها',icon:Layers3},{id:'alerts',label:'مرکز هشدار',icon:Bell},{id:'risk',label:'ریسک و تقویم بازار',icon:ShieldCheck},{id:'profiles',label:'اشخاص و سازمان‌ها',icon:Users},{id:'media',label:'آرشیو رسانه',icon:Images},{id:'sources',label:'سلامت منابع',icon:Database},{id:'backup',label:'پشتیبان و بازیابی',icon:FolderOpen},{id:'settings',label:'ترجمه و به‌روزرسانی',icon:Settings2}];
   return <section className="wb" aria-label="بانک خبر پیشرفته"><nav className="wb-tabs" aria-label="ابزارهای بانک خبر">{tabs.map(item=><button key={item.id} aria-pressed={tab===item.id} className={tab===item.id?'active':''} onClick={()=>setTab(item.id)}><item.icon size={16}/>{item.label}</button>)}</nav>
     {(['search','events','media'] as Tab[]).includes(tab)&&<SearchDesk key={tab} mode={tab as 'search'|'events'|'media'} sources={sources} onSelect={setSelected}/>}
+    {tab==='lab'&&<ResearchLab onSelect={setSelected}/>}
     {tab==='alerts'&&<AlertsDesk sources={sources}/>}{tab==='profiles'&&<ProfilesDesk onSelect={setSelected}/>}{tab==='risk'&&<RiskDesk onSelect={setSelected}/>}{tab==='sources'&&<SourcesDesk onChanged={onChanged}/>}{tab==='backup'&&<BackupDesk onChanged={onChanged}/>}{tab==='settings'&&<IntegrationDesk/>}
     {selected&&<ArticleResearch id={selected} onClose={()=>setSelected(null)} onChanged={onChanged}/>}
   </section>;

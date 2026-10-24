@@ -13,8 +13,10 @@ import ArchivePanel from './ArchivePanel';
 import NewsWorkbench from './NewsWorkbench';
 import ArticleResearch from './ArticleResearch';
 import { useNewsAlerts } from './newsroom-client';
+import ResearchLab from './ResearchLab';
+import { SessionControls } from './AccessGate';
 
-type Page = 'news' | 'saved' | 'sources' | 'connections' | 'keywords' | 'archive' | 'atlas' | 'markets' | 'officials' | 'workbench';
+type Page = 'news' | 'saved' | 'sources' | 'connections' | 'keywords' | 'archive' | 'atlas' | 'markets' | 'officials' | 'workbench' | 'lab';
 type Platform = 'telegram' | 'x' | 'instagram' | 'facebook' | 'linkedin';
 export type Article = {
   id: string; title: string; summary: string; fullText?: string; textScope?: string; url: string; imageUrl: string | null;
@@ -278,6 +280,7 @@ function App() {
   const navItems: { id: Page; label: string; icon: typeof Newspaper; count?: number }[] = [
     { id: 'news', label: 'اتاق خبر', icon: Newspaper },
     { id: 'workbench', label: 'بانک خبر پیشرفته', icon: ShieldCheck, count: unreadAlerts || undefined },
+    { id: 'lab', label: 'دستیار و ابزارهای تازه', icon: Sparkles },
     { id: 'saved', label: 'ذخیره‌شده‌ها', icon: Bookmark, count: savedCount },
     { id: 'archive', label: 'تاریخچهٔ خبر', icon: Layers3 },
     { id: 'atlas', label: 'نقشهٔ خبر', icon: Globe2 },
@@ -311,13 +314,13 @@ function App() {
       <div className="main-shell">
         <header className="topbar">
           <div className="topbar-breadcrumb"><button className="mobile-menu icon-button" onClick={() => setMenuOpen(true)} aria-label="باز کردن فهرست"><Menu size={22} /></button><span>فضای کاری</span><ChevronLeft size={14} /><strong>{navItems.find(item => item.id === page)?.label}</strong></div>
-          <div className="topbar-meta"><span className="today-date">{new Intl.DateTimeFormat('fa-IR', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'Asia/Tehran' }).format(new Date())}</span><span className="topbar-separator" /><span className="private-badge"><ShieldCheck size={15} />فضای شخصی شما</span></div>
+          <div className="topbar-meta"><SessionControls/><span className="today-date">{new Intl.DateTimeFormat('fa-IR', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'Asia/Tehran' }).format(new Date())}</span><span className="topbar-separator" /><span className="private-badge"><ShieldCheck size={15} />فضای شخصی شما</span></div>
         </header>
 
         <NewsTicker articles={data.articles} onOpen={article => { if (!article.read) void markRead(article as Article, true); }} />
         <main className="main-content">
           <section className="page-heading">
-            <div><div className="eyebrow"><span /> یک نگاه، تمام خبرها</div><h1>{page === 'workbench' ? <>بانک خبر، <span>ابزارهای پژوهش و پایش</span></> : page === 'news' ? <>اتاق خبر شما، <span>همیشه بیدار</span></> : page === 'saved' ? <>خبرهایی برای <span>دوباره خواندن</span></> : page === 'sources' ? <>منابع بیشتر، <span>دید وسیع‌تر</span></> : page === 'connections' ? <>همهٔ شبکه‌ها، <span>یک اتاق خبر</span></> : page === 'archive' ? <>تاریخچهٔ خبر، <span>حافظهٔ اتاق خبر</span></> : page === 'atlas' ? <>خبرها، <span>روی نقشهٔ جهان</span></> : page === 'markets' ? <>بازارهای جهانی، <span>با دادهٔ واقعی</span></> : page === 'officials' ? <>صدای رسمی، <span>از منبع اصلی</span></> : <>موضوع‌های شما، <span>در مرکز توجه</span></>}</h1><p>{page === 'workbench' ? 'جست‌وجو، مقایسهٔ روایت‌ها، هشدار و مدیریت آرشیو در یک فضا.' : page === 'news' ? 'از هیاهوی جهان، به خبرهایی برسید که برای شما مهم‌اند.' : page === 'saved' ? 'خبرهای منتخب شما، همیشه در دسترس و یک جا.' : page === 'sources' ? 'فیدهای خبری معتبر را اضافه کنید و وضعیت دریافت خبر را ببینید.' : page === 'connections' ? 'با دسترسی رسمی حساب‌ها، جریان خبر خود را کامل کنید.' : page === 'archive' ? 'خبرهای بایگانی‌شده را با تاریخ، منبع و موضوع پیدا کنید.' : page === 'atlas' ? 'خبرها بر اساس مکان‌های نام‌برده‌شده در متن نمایش داده می‌شوند.' : page === 'markets' ? 'قیمت، زمان داده، واحد و نمودار را کنار هم ببینید.' : page === 'officials' ? 'منابع رسمی و سخنرانی‌ها را جدا از گزارش خبرگزاری‌ها دنبال کنید.' : 'کلمات کلیدی و هشتگ‌ها را برای جست‌وجو و اولویت‌بندی خبرها مشخص کنید.'}</p></div>
+            <div><div className="eyebrow"><span /> یک نگاه، تمام خبرها</div><h1>{page === 'lab' ? <>دستیار آرشیو، <span>پژوهش و اجرای ویندوز</span></> : page === 'workbench' ? <>بانک خبر، <span>ابزارهای پژوهش و پایش</span></> : page === 'news' ? <>اتاق خبر شما، <span>همیشه بیدار</span></> : page === 'saved' ? <>خبرهایی برای <span>دوباره خواندن</span></> : page === 'sources' ? <>منابع بیشتر، <span>دید وسیع‌تر</span></> : page === 'connections' ? <>همهٔ شبکه‌ها، <span>یک اتاق خبر</span></> : page === 'archive' ? <>تاریخچهٔ خبر، <span>حافظهٔ اتاق خبر</span></> : page === 'atlas' ? <>خبرها، <span>روی نقشهٔ جهان</span></> : page === 'markets' ? <>بازارهای جهانی، <span>با دادهٔ واقعی</span></> : page === 'officials' ? <>صدای رسمی، <span>از منبع اصلی</span></> : <>موضوع‌های شما، <span>در مرکز توجه</span></>}</h1><p>{page === 'lab' ? 'پرسش از خبرها، ابزارهای رسانه، شرکت‌ها و نسخهٔ نصب‌شونده.' : page === 'workbench' ? 'جست‌وجو، مقایسهٔ روایت‌ها، هشدار و مدیریت آرشیو در یک فضا.' : page === 'news' ? 'از هیاهوی جهان، به خبرهایی برسید که برای شما مهم‌اند.' : page === 'saved' ? 'خبرهای منتخب شما، همیشه در دسترس و یک جا.' : page === 'sources' ? 'فیدهای خبری معتبر را اضافه کنید و وضعیت دریافت خبر را ببینید.' : page === 'connections' ? 'با دسترسی رسمی حساب‌ها، جریان خبر خود را کامل کنید.' : page === 'archive' ? 'خبرهای بایگانی‌شده را با تاریخ، منبع و موضوع پیدا کنید.' : page === 'atlas' ? 'خبرها بر اساس مکان‌های نام‌برده‌شده در متن نمایش داده می‌شوند.' : page === 'markets' ? 'قیمت، زمان داده، واحد و نمودار را کنار هم ببینید.' : page === 'officials' ? 'منابع رسمی و سخنرانی‌ها را جدا از گزارش خبرگزاری‌ها دنبال کنید.' : 'کلمات کلیدی و هشتگ‌ها را برای جست‌وجو و اولویت‌بندی خبرها مشخص کنید.'}</p></div>
             <button className="primary-button" onClick={() => void sync()} disabled={syncing || loading}><RefreshCw size={16} className={syncing ? 'spin' : ''} />{syncing ? 'در حال جمع‌آوری…' : 'جمع‌آوری خبرها'}</button>
           </section>
 
@@ -355,6 +358,7 @@ function App() {
           {page === 'atlas' && <AtlasPanel articles={data.articles} />}
           {page === 'markets' && <MarketsPanel />}
           {page === 'workbench' && <NewsWorkbench sources={data.sources} onChanged={() => void load()} />}
+          {page === 'lab' && <ResearchLab onSelect={setResearchId} />}
 
 
           {page === 'connections' && <section className="management-section"><div className="section-title-row"><div><h2><span className="section-marker" />شبکه‌های اجتماعی</h2><p className="section-description">اتصال‌ها فقط محتوایی را می‌خوانند که API رسمی در اختیار حساب شما قرار می‌دهد.</p></div><span className="outline-badge"><ShieldCheck size={15} />دسترسی مجاز</span></div><div className="connection-cards">{connections.map(connection => { const meta = platformMeta[connection.platform]; return <article className="connection-card" key={connection.platform}><div className="connection-top"><span className="platform-logo" style={{ color: meta.color, backgroundColor: `${meta.color}10` }}><PlatformIcon platform={connection.platform} size={25} /></span><span className={`connection-status ${connection.connected ? 'connected' : ''}`}>{connection.connected ? <><span className="status-dot" />متصل</> : meta.supported ? 'متصل نشده' : 'نیازمند مجوز پلتفرم'}</span></div><h3>{meta.name}<small>{meta.english}</small></h3><p>{meta.description}</p>{connection.connected && <div className="connection-account"><CheckCheck size={15} />{connection.label || 'حساب تأییدشده'}</div>}<div className="connection-footer">{connection.connected ? <button className="disconnect-button" disabled={busy === connection.platform} onClick={() => void mutate(`/connections/${connection.platform}`, 'DELETE', undefined, 'اتصال حساب قطع شد.', connection.platform)}><Link2 size={15} />قطع اتصال</button> : <button className={meta.supported ? 'secondary-button' : 'muted-button'} onClick={() => setModal(connection.platform)}>{meta.supported ? <Plus size={15} /> : <CircleHelp size={15} />}{meta.supported ? 'اتصال حساب' : 'شرایط اتصال'}</button>}<span>{connection.platform === 'telegram' ? 'Bot API' : connection.platform === 'x' ? 'API v2' : 'API رسمی'}</span></div></article>; })}</div><CustomNetworks connections={data.customConnections || []} onChange={async () => { await load(); }} notify={notify} /><div className="info-strip"><ShieldCheck size={19} /><p>رمز عبور شبکه‌های اجتماعی را وارد نکنید. توکن‌های اتصال در سرور به‌صورت رمزگذاری‌شده نگه‌داری می‌شوند. این نسخه اتصال عمومی OAuth برای همهٔ پلتفرم‌ها ندارد.</p></div></section>}

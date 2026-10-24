@@ -1,0 +1,5 @@
+{
+  "id":"/", "name":"دیدبان — بانک خبر", "short_name":"دیدبان", "lang":"fa", "dir":"rtl",
+  "start_url":"/", "scope":"/", "display":"standalone", "background_color":"#f7f8fa", "theme_color":"#152f39",
+  "icons":[{"src":"/dideban-icon.svg","sizes":"any","type":"image/svg+xml","purpose":"any maskable"}]
+}

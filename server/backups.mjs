@@ -4,7 +4,7 @@ import path from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomBytes, scryptSync, createCipheriv, createDecipheriv } from 'node:crypto';
 
-const TABLES=['sources','articles','settings','connections','story_state','article_versions','research_items','profiles','watch_rules','news_alerts','translations','calendar_events','saved_searches'];
+const TABLES=['sources','articles','settings','connections','story_state','article_versions','research_items','profiles','watch_rules','news_alerts','translations','calendar_events','saved_searches','semantic_vectors','media_transcripts','archive_questions'];
 const MAGIC=Buffer.from('DIDEBAN3');
 function passwordKey(password,salt) {
   if(typeof password!=='string'||password.length<12||password.length>256)throw new Error('گذرواژهٔ پشتیبان باید بین ۱۲ و ۲۵۶ نویسه باشد.');
@@ -44,6 +44,7 @@ export function createBackupService(store) {
       for(const table of TABLES) {
         const columns=store.db.prepare(`PRAGMA table_info(${table})`).all().map(c=>c.name);
         const existing=source.prepare(`PRAGMA table_info(${table})`).all().map(c=>c.name);
+        if(!existing.length && ['semantic_vectors','media_transcripts','archive_questions'].includes(table)){imported.set(table,{columns,rows:[]});continue;}
         if(columns.some(c=>!existing.includes(c)))throw new Error('ساختار این پشتیبان با نسخهٔ برنامه سازگار نیست.');
         const rows=source.prepare(`SELECT ${columns.join(',')} FROM ${table}`).all();
         if(table==='connections')for(const row of rows) {
@@ -63,6 +64,7 @@ export function createBackupService(store) {
           const insert=store.db.prepare(`INSERT INTO ${table}(${columns.join(',')}) VALUES(${columns.map(()=>'?').join(',')})`);
           for(const row of rows)insert.run(...columns.map(c=>row[c]));
         }
+        store.db.exec('DELETE FROM login_sessions');
         store.db.exec('COMMIT');
       }catch(error){store.db.exec('ROLLBACK');throw error;}
       return {restored:true,articleCount:store.archiveCoverage().articleCount};
