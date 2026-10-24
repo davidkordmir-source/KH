@@ -1,3 +1,4 @@
+import NewsTicker from './NewsTicker';
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import {
   ArrowDownWideNarrow, ArrowLeft, ArrowUpLeft, Bookmark, Check, CheckCheck,
@@ -87,7 +88,6 @@ function App() {
   const [showAllErrors, setShowAllErrors] = useState(false);
   const [savedArticles, setSavedArticles] = useState<Article[] | null>(null);
   const [readFilter, setReadFilter] = useState('all');
-  const [tickerPaused, setTickerPaused] = useState(false);
   const pageRef = useRef(page);
   pageRef.current = page;
   const toastTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -200,7 +200,6 @@ function App() {
 
   const connections = (Object.keys(platformMeta) as Platform[]).map(platform => data.connections.find(item => item.platform === platform) ?? { platform, connected: false, label: null, capability: '' });
   const savedCount = page === 'saved' && savedArticles ? savedArticles.length : data.articles.filter(article => article.saved).length;
-  const tickerArticles = data.articles.filter(article => Number(article.priority || 0) >= 3).slice(0, 15);
   const sourceById = new Map(data.sources.map(source => [source.id, source]));
   const activeSourceCount = data.sources.filter(source => source.enabled).length;
   const todayCount = data.articles.filter(article => article.publishedAtKnown !== false && new Date(article.publishedAt).toLocaleDateString('en-CA', { timeZone: 'Asia/Tehran' }) === new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Tehran' })).length;
@@ -309,7 +308,7 @@ function App() {
           <div className="topbar-meta"><span className="today-date">{new Intl.DateTimeFormat('fa-IR', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'Asia/Tehran' }).format(new Date())}</span><span className="topbar-separator" /><span className="private-badge"><ShieldCheck size={15} />فضای شخصی شما</span></div>
         </header>
 
-        {tickerArticles.length > 0 && <div className={`breaking-ticker ${tickerPaused ? 'is-paused' : ''}`} aria-label="نوار خبرهای بسیار مهم"><strong><Radio size={16} /> بسیار مهم</strong><div className="ticker-window"><div className="ticker-track">{tickerArticles.map(article => <a key={article.id} href={article.url} target="_blank" rel="noreferrer" onClick={() => { if (!article.read) void markRead(article, true); }}>{article.title}<span> • </span></a>)}</div></div><button onClick={() => setTickerPaused(!tickerPaused)} aria-label={tickerPaused ? 'حرکت نوار خبر' : 'توقف نوار خبر'}>{tickerPaused ? 'ادامه' : 'توقف'}</button></div>}
+        <NewsTicker articles={data.articles} onOpen={article => { if (!article.read) void markRead(article as Article, true); }} />
         <main className="main-content">
           <section className="page-heading">
             <div><div className="eyebrow"><span /> یک نگاه، تمام خبرها</div><h1>{page === 'news' ? <>اتاق خبر شما، <span>همیشه بیدار</span></> : page === 'saved' ? <>خبرهایی برای <span>دوباره خواندن</span></> : page === 'sources' ? <>منابع بیشتر، <span>دید وسیع‌تر</span></> : page === 'connections' ? <>همهٔ شبکه‌ها، <span>یک اتاق خبر</span></> : page === 'archive' ? <>تاریخچهٔ خبر، <span>حافظهٔ اتاق خبر</span></> : page === 'atlas' ? <>خبرها، <span>روی نقشهٔ جهان</span></> : page === 'markets' ? <>بازارهای جهانی، <span>با دادهٔ واقعی</span></> : page === 'officials' ? <>صدای رسمی، <span>از منبع اصلی</span></> : <>موضوع‌های شما، <span>در مرکز توجه</span></>}</h1><p>{page === 'news' ? 'از هیاهوی جهان، به خبرهایی برسید که برای شما مهم‌اند.' : page === 'saved' ? 'خبرهای منتخب شما، همیشه در دسترس و یک جا.' : page === 'sources' ? 'فیدهای خبری معتبر را اضافه کنید و وضعیت دریافت خبر را ببینید.' : page === 'connections' ? 'با دسترسی رسمی حساب‌ها، جریان خبر خود را کامل کنید.' : page === 'archive' ? 'خبرهای بایگانی‌شده را با تاریخ، منبع و موضوع پیدا کنید.' : page === 'atlas' ? 'خبرها بر اساس مکان‌های نام‌برده‌شده در متن نمایش داده می‌شوند.' : page === 'markets' ? 'قیمت، زمان داده، واحد و نمودار را کنار هم ببینید.' : page === 'officials' ? 'منابع رسمی و سخنرانی‌ها را جدا از گزارش خبرگزاری‌ها دنبال کنید.' : 'کلمات کلیدی و هشتگ‌ها را برای جست‌وجو و اولویت‌بندی خبرها مشخص کنید.'}</p></div>

@@ -1,0 +1,14 @@
+.tv-news-ticker{position:fixed;bottom:0;left:0;right:var(--sidebar-width,246px);z-index:45;display:flex;align-items:stretch;height:58px;background:#b71924;color:#fff;border-top:3px solid #f15b62;box-shadow:0 -3px 18px #10252b25;isolation:isolate}
+.tv-ticker-label{display:flex;align-items:center;gap:8px;flex-shrink:0;white-space:nowrap;padding:0 20px;background:#94131d;font-size:14px;z-index:1}
+.tv-ticker-window{flex:1;min-width:0;overflow:hidden;display:flex;align-items:center;direction:ltr}
+.tv-ticker-track{display:flex;flex-shrink:0;width:max-content;animation:tv-news-crawl linear infinite;will-change:transform}
+.tv-ticker-group{display:flex;align-items:center;flex-shrink:0;direction:rtl;gap:0;padding-inline-end:35px}
+.tv-ticker-group a{display:flex;align-items:center;gap:12px;white-space:nowrap;font-size:14px;font-weight:500;line-height:1.8;padding:6px 0;color:#fff;text-decoration:none}
+.tv-ticker-group a:hover{text-decoration:underline}.tv-story-source{font-size:11px;background:#ffffff20;border-radius:4px;padding:2px 7px}.tv-story-separator{color:#ffafb4;font-size:11px;margin:0 24px}
+.tv-ticker-control{display:flex;align-items:center;justify-content:center;gap:6px;flex-shrink:0;min-width:78px;background:#94131d;color:#fff;padding:0 14px;font-size:12px}.tv-ticker-control:hover{background:#79101a}
+.tv-ticker-empty{direction:rtl;padding:0 18px;margin:0;font-size:12px;line-height:1.7}
+.tv-news-ticker.tv-paused .tv-ticker-track,.tv-ticker-window:hover .tv-ticker-track,.tv-ticker-window:focus-within .tv-ticker-track{animation-play-state:paused}
+.main-shell{padding-bottom:70px}
+@keyframes tv-news-crawl{from{transform:translateX(-50%)}to{transform:translateX(0)}}
+@media(max-width:700px){.tv-news-ticker{right:0;height:55px}.tv-ticker-label{padding:0 10px;font-size:12px;gap:5px}.tv-ticker-label svg{width:15px}.tv-ticker-control{min-width:43px;padding:0 10px}.tv-ticker-control span{display:none}.tv-ticker-group a{font-size:13px}.tv-story-source{font-size:10px}.tv-ticker-empty{font-size:11px;padding:0 10px}.main-shell{padding-bottom:68px}}
+@media(prefers-reduced-motion:reduce){.tv-ticker-track{animation:none!important;transform:none!important}.tv-ticker-group[aria-hidden=true]{display:none}.tv-ticker-window{overflow-x:auto}}
