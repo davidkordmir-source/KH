@@ -62,6 +62,9 @@ export function registerNewsroomRoutes({app,store,newsroom,backups,dateBound,fet
     store.setConnection('translator','Microsoft Translator',{token,region});res.json({configured:true,verified:false});
   }));
   app.delete('/api/newsroom/translator',(_req,res)=>{store.deleteConnection('translator');res.json({removed:true});});
+  app.get('/api/newsroom/translation/preferences',(_req,res)=>res.json({automatic:store.getSetting('autoTranslateForeignNews',true),configured:!!store.getConnection('translator')}));
+  app.put('/api/newsroom/translation/preferences',route((req,res)=>{if(typeof req.body?.automatic!=='boolean')throw new Error('تنظیم ترجمه معتبر نیست.');store.setSetting('autoTranslateForeignNews',req.body.automatic);res.json({saved:true});}));
+  app.post('/api/newsroom/translation/recent',route(async(_req,res)=>res.json(await newsroom.translateRecent())));
   app.get('/api/newsroom/backups',(_req,res)=>res.json({backups:backups.list(),lastBackupAt:store.getSetting('lastBackupAt'),preferences:store.getSetting('backupPreferences',{enabled:true,retention:7})}));
   app.put('/api/newsroom/backups/preferences',route((req,res)=>{
     const {enabled,retention}=req.body||{};if(typeof enabled!=='boolean'||!Number.isInteger(retention)||retention<2||retention>30)throw new Error('تعداد نسخه‌ها باید بین ۲ و ۳۰ باشد.');

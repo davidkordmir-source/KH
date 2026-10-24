@@ -120,5 +120,14 @@ export function createArchiveService({ store, fetcher = safeFetch, environment =
       scope: 'فقط پاسخ‌های قابل دسترس این ناشر؛ نمایندهٔ تمام خبرهای جهان در آن روز نیست.',
     };
   }
-  return { status, connectGuardian, importDay };
+  async function importRange({dateFrom,dateTo,query='',page=1}={}) {
+    validateArchiveDate(dateFrom);validateArchiveDate(dateTo);
+    if(dateFrom>dateTo||typeof query!=='string'||query.length>200||!Number.isInteger(page)||page<1||page>100000)throw new ArchiveAccessError('بازه، عبارت یا صفحهٔ آرشیو معتبر نیست.');
+    const token=configuredToken();if(!token)throw new ArchiveAccessError('برای دریافت تاریخچهٔ ناشر، ابتدا کلید رسمی Guardian را متصل کنید.',428);
+    const result=await guardianRequest(token,{'from-date':previousDay(dateFrom),'to-date':dateTo,'use-date':'published','order-by':'newest','page-size':PAGE_SIZE,page,'show-fields':'trailText,thumbnail,bodyText',...(query.trim()?{q:query.trim()}:{})});
+    const articles=result.results.flatMap(item=>{const time=new Date(item.webPublicationDate);if(!Number.isFinite(time.getTime()))return [];const day=tehranDay(time.toISOString());if(day<dateFrom||day>dateTo)return [];const article=guardianArticle(item,day);return article?[article]:[];});
+    store.addArticles(articles);const pages=Math.max(1,Number(result.pages)||1);
+    return {imported:articles.length,dateFrom,dateTo,page,pages,nextPage:page<pages?page+1:null,totalAvailable:Number(result.total)||0,coverage:coverage(),provider:'Guardian Content API',scope:'فقط آرشیو قابل دسترسی گاردین؛ شمارش ناشر ممکن است شامل بخش خارج از مرز روز تهران باشد.'};
+  }
+  return { status, connectGuardian, importDay,importRange };
 }

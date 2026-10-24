@@ -64,7 +64,7 @@ export function createApp({ directory = path.resolve('.data'), distDirectory = p
   const archive = createArchiveService({ store, fetcher });
   const telegramMedia = createTelegramMediaService({ store, requestJson, fetchBinary: (url, options = {}) => fetcher(url, { ...options, responseType: 'buffer', allowedHosts: ['api.telegram.org'] }) });
   const customConnections = () => store.getSetting('customConnections', []);
-  const dashboard = () => ({ ...store.dashboard(), customConnections: customConnections().map(({ id, type, label, description }) => ({ id, type, label, description, connected: true })) });
+  const dashboard = () => {const data=store.dashboard();return { ...data,articles:newsroom.decorate(data.articles), customConnections: customConnections().map(({ id, type, label, description }) => ({ id, type, label, description, connected: true })) };};
 
   function dateBound(value, end = false) {
     if (!value) return undefined;
@@ -211,6 +211,7 @@ export function createApp({ directory = path.resolve('.data'), distDirectory = p
       store.setSetting('lastSyncAt', new Date().toISOString());
       for(const feed of await newsroom.calendarService.sync())if(feed.lastError)errors.push({sourceId:feed.id,sourceName:feed.name,message:feed.lastError});
       store.setSetting('syncErrors', errors);
+      if(store.getSetting('autoTranslateForeignNews',true))try{await newsroom.translateRecent();}catch{errors.push({sourceId:'translation',sourceName:'ترجمهٔ فارسی',message:'ترجمهٔ بخشی از خبرها انجام نشد؛ کلید، سهمیه یا اتصال سرویس ترجمه را بررسی کنید.'});store.setSetting('syncErrors',errors);}
       if(store.getSetting('autoSemanticIndex',false)&&store.getConnection('intelligence'))try{await lab.intelligence.index();}catch{errors.push({sourceId:'semantic-index',sourceName:'نمایهٔ معنایی',message:'نمایه‌سازی خبرهای تازه انجام نشد؛ اتصال هوش مصنوعی را بررسی کنید.'});store.setSetting('syncErrors',errors);}
       await newsroom.evaluate();
       try { backups.snapshot(); } catch { store.setSetting('backupError','پشتیبان خودکار انجام نشد؛ فضای دیسک و دسترسی پوشه را بررسی کنید.'); }
@@ -229,7 +230,7 @@ export function createApp({ directory = path.resolve('.data'), distDirectory = p
     const from = dateBound(dateFrom), to = dateBound(dateTo, true);
     if (from && to && from > to) return res.status(400).json({ error: 'ابتدای بازه باید پیش از انتهای آن باشد.' });
     const result=store.searchArchive({ ...archiveFilters(req.query,dateBound), limit: Number(limit), offset: Number(offset) });
-    res.json({...result,articles:result.articles.map(({fullText,...article})=>article)});
+    res.json({...result,articles:newsroom.decorate(result.articles.map(({fullText,...article})=>article))});
   }));
   app.get('/api/markets', route(async (req, res) => res.json(await markets.getMarkets({ force: req.query.refresh === '1' }))));
   app.get('/api/archive/status', (_req, res) => res.json(archive.status()));
@@ -238,6 +239,7 @@ export function createApp({ directory = path.resolve('.data'), distDirectory = p
     res.json(await archive.connectGuardian(req.body.token));
   }));
   app.post('/api/archive/import', route(async (req, res) => res.json(await archive.importDay(req.body || {}))));
+  app.post('/api/archive/import-range',route(async(req,res)=>res.json(await archive.importRange(req.body||{}))));
   app.get('/api/catalog', (_req, res) => res.json({ sources: SOURCE_CATALOG.map(source => ({ ...source, websiteUrl: OFFICIAL_WEBSITES[source.id] || source.url })) }));
   app.post('/api/catalog/:id/add', route(async (req, res) => {
     const entry = SOURCE_CATALOG.find(item => item.id === req.params.id);

@@ -131,3 +131,9 @@ test('transport errors containing credential URLs cannot leak secrets through pu
   const service = createArchiveService({ store, environment: { GUARDIAN_API_KEY: TOKEN }, fetcher: async url => { throw new Error(`network failed for ${url}`); } });
   await assert.rejects(() => service.importDay({ date: DAY }), error => error.status === 502 && !error.message.includes(TOKEN) && !error.message.includes('api-key='));
 });
+
+test('historical range imports retain Tehran boundaries and return a resumable page',async()=>{
+ const store=fakeStore();store.setConnection('guardianArchive','Archive',{token:TOKEN});
+ const service=createArchiveService({store,environment:{},fetcher:async raw=>{const url=new URL(raw);assert.equal(url.searchParams.get('page'),'3');assert.equal(url.searchParams.get('from-date'),'2023-10-23');return ok([item()],4);}});
+ const result=await service.importRange({dateFrom:'2023-10-24',dateTo:'2026-10-24',page:3});assert.equal(result.nextPage,4);assert.equal(result.imported,1);
+});

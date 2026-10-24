@@ -30,9 +30,39 @@ function Stop-OwnServer {
     if (-not $script:Node.WaitForExit(12000)) { $script:Node.Kill(); $script:Node.WaitForExit() }
   }
 }
+$script:AppWindow=$null
 function Open-Dideban {
-  if ($script:Address) { Start-Process ($script:Address + '/?v=' + (Get-Content (Join-Path $script:AppRoot 'package.json') -Raw | ConvertFrom-Json).version) }
-  else { $script:Icon.ShowBalloonTip(4000,'Dideban','Preparing your news archive. Please wait.',[Windows.Forms.ToolTipIcon]::Info) }
+  if (-not $script:Address) { $script:Icon.ShowBalloonTip(4000,'Dideban','Preparing your archive. Please wait.',[Windows.Forms.ToolTipIcon]::Info); return }
+  if ($script:AppWindow -and -not $script:AppWindow.IsDisposed) { $script:AppWindow.Show(); $script:AppWindow.WindowState='Normal'; $script:AppWindow.Activate(); return }
+  try {
+    $library=Join-Path $PSScriptRoot 'webview2'
+    $env:PATH=$library + ';' + $env:PATH
+    Add-Type -Path (Join-Path $library 'Microsoft.Web.WebView2.Core.dll')
+    Add-Type -Path (Join-Path $library 'Microsoft.Web.WebView2.WinForms.dll')
+    $runtime=[Microsoft.Web.WebView2.Core.CoreWebView2Environment]::GetAvailableBrowserVersionString()
+    if (-not $runtime) { throw 'Microsoft WebView2 Runtime is not installed.' }
+    $script:AppWindow=New-Object Windows.Forms.Form
+    $script:AppWindow.Text='Dideban'; $script:AppWindow.Width=1280; $script:AppWindow.Height=850
+    $script:AppWindow.MinimumSize=New-Object Drawing.Size(800,600)
+    $view=New-Object Microsoft.Web.WebView2.WinForms.WebView2
+    $properties=New-Object Microsoft.Web.WebView2.WinForms.CoreWebView2CreationProperties
+    $properties.UserDataFolder=Join-Path $script:DataRoot 'webview-profile'
+    $view.CreationProperties=$properties; $view.Dock='Fill'
+    $view.Add_CoreWebView2InitializationCompleted({
+      param($sender,$eventArgs)
+      if (-not $eventArgs.IsSuccess) { [Windows.Forms.MessageBox]::Show('WebView2 could not initialize. Install the Microsoft WebView2 Evergreen Runtime.','Dideban') | Out-Null; return }
+      $sender.CoreWebView2.Add_NewWindowRequested({param($web,$webEvent);$webEvent.Handled=$true;$uri=[Uri]$webEvent.Uri;if($uri.Scheme -in @('https','http')){Start-Process $uri.AbsoluteUri}})
+      $sender.CoreWebView2.Add_NavigationStarting({param($web,$webEvent);$uri=[Uri]$webEvent.Uri;if($uri.Scheme -in @('https','http') -and $uri.Authority -ne ([Uri]$script:Address).Authority){$webEvent.Cancel=$true;Start-Process $uri.AbsoluteUri}})
+    })
+    $script:AppWindow.Controls.Add($view)
+    $view.Source=[Uri]($script:Address + '/')
+    $script:AppWindow.Add_FormClosing({param($sender,$eventArgs);if(-not $script:Updating){$eventArgs.Cancel=$true;$sender.Hide()}})
+    $script:AppWindow.Show(); $script:AppWindow.Activate()
+  } catch {
+    $edge=Join-Path ${env:ProgramFiles(x86)} 'Microsoft\Edge\Application\msedge.exe'
+    if(Test-Path $edge){Start-Process -FilePath $edge -ArgumentList ('--app="' + $script:Address + '"'),('--user-data-dir="' + (Join-Path $script:DataRoot 'edge-app-profile') + '"')}
+    else{[Windows.Forms.MessageBox]::Show('Install Microsoft WebView2 Evergreen Runtime from https://developer.microsoft.com/microsoft-edge/webview2/ and open Dideban again.','Dideban') | Out-Null}
+  }
 }
 function Install-PreparedUpdate {
   if ($script:Updating) { return }

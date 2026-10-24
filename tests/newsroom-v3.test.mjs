@@ -147,3 +147,13 @@ test('upgrading a v2 database makes a consistent safety copy and preserves bookm
   store=new Store(directory);t.after(()=>store.close());assert.deepEqual(readFileSync(path.join(directory,'credentials.key')),key);assert.equal(store.article('previous').saved,true);assert.equal(store.getConnection('x').token,'preserved-key');
   const snapshot=new DatabaseSync(path.join(directory,'news.pre-v3.sqlite'),{readOnly:true});assert.equal(snapshot.prepare('SELECT saved FROM articles WHERE id=?').get('previous').saved,1);snapshot.close();
 });
+
+test('foreign news translation is displayed alongside the original and invalidated on publisher edits',async t=>{
+ const {store,call}=await api(t,async()=>JSON.stringify([{translations:[{text:'عنوان فارسی خبر'}]},{translations:[{text:'متن ترجمه‌شده خبر نظامی'}]}]));
+ store.addArticles([record('foreign',{language:'en',title:'Military statement issued today',fullText:'Original English source text.'})]);
+ await call('/api/newsroom/translator','POST',{token:'test-translator-key',region:''});
+ const translated=await(await call('/api/newsroom/translation/recent','POST',{})).json();assert.equal(translated.translated,1);
+ const item=(await(await call('/api/dashboard')).json()).articles.find(a=>a.id==='foreign');assert.equal(item.title,'Military statement issued today');assert.equal(item.translatedTitle,'عنوان فارسی خبر');
+ store.addArticles([record('foreign',{language:'en',title:'Military statement updated today',fullText:'Updated original text.'})]);
+ assert.equal((await(await call('/api/dashboard')).json()).articles.find(a=>a.id==='foreign').translatedTitle,undefined);
+});

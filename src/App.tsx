@@ -19,7 +19,7 @@ import { SessionControls } from './AccessGate';
 type Page = 'news' | 'saved' | 'sources' | 'connections' | 'keywords' | 'archive' | 'atlas' | 'markets' | 'officials' | 'workbench' | 'lab';
 type Platform = 'telegram' | 'x' | 'instagram' | 'facebook' | 'linkedin';
 export type Article = {
-  id: string; title: string; summary: string; fullText?: string; textScope?: string; url: string; imageUrl: string | null;
+  id: string; title: string; summary: string; translatedTitle?: string; translatedSummary?: string; translationProvider?: string; fullText?: string; textScope?: string; url: string; imageUrl: string | null;
   sourceId: string; sourceName: string; platform: string; publishedAt: string; publishedAtKnown?: boolean;
   category: string; language: string; saved: boolean; seen?: boolean; read?: boolean; readAt?: string | null; priority?: number; duplicateGroup?: string; duplicateCount?: number; readInherited?: boolean; summaryAuto?: string; summaryMethod?: string; sourceIconUrl?: string | null; media?: {type: 'image' | 'video'; url: string; mimeType?: string; poster?: string; source?: string}[]; locations?: {countryCode: string; countryName: string; city?: string; lat: number; lon: number}[];
 };
@@ -431,7 +431,7 @@ function ArticleCard({ article, featured, busy, onSave, onRead, onOpen, onPriori
           {article.read && <span className="read-badge"><CheckCheck size={13} />خوانده‌شده</span>}
         </div>
         <a className="article-title" href={article.url} target="_blank" rel="noreferrer" onClick={onOpen}><h3 dir="auto">{article.title}</h3></a>
-        <p className="article-summary" dir="auto">{article.summary}</p>
+        <p className="article-summary" dir="auto">{article.summary}</p>{article.translatedTitle && <div className="generated-summary" lang="fa"><small>ترجمهٔ فارسی · {article.translationProvider}</small><h3>{article.translatedTitle}</h3><p>{article.translatedSummary}</p></div>}
         {(article.duplicateCount || 0) > 0 && <div className="duplicate-badge"><Layers3 size={13} />عنوان مشابه در {number((article.duplicateCount || 0) + 1)} گزارش{article.readInherited ? ' · از قبل خوانده‌شده' : ''}</div>}
         {!!article.locations?.length && <div className="article-places">{article.locations.slice(0, 3).map(location => <span key={`${location.countryCode}-${location.city || ''}`}><Globe2 size={11} />{location.city || location.countryName}</span>)}</div>}
         {article.summaryAuto && <div className="article-summary-tool"><button className="text-button" onClick={() => setSummaryOpen(!summaryOpen)} aria-expanded={summaryOpen}><Sparkles size={14} />{summaryOpen ? 'بستن خلاصه' : 'خلاصهٔ خودکار'}</button>{summaryOpen && <div className="generated-summary"><small>خلاصهٔ استخراجی از متن خبر؛ بدون افزودن تحلیل یا ادعای جدید</small><p dir="auto">{article.summaryAuto}</p></div>}</div>}

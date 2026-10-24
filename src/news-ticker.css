@@ -12,3 +12,7 @@
 @keyframes tv-news-crawl{from{transform:translateX(-50%)}to{transform:translateX(0)}}
 @media(max-width:700px){.tv-news-ticker{right:0;height:55px}.tv-ticker-label{padding:0 10px;font-size:12px;gap:5px}.tv-ticker-label svg{width:15px}.tv-ticker-control{min-width:43px;padding:0 10px}.tv-ticker-control span{display:none}.tv-ticker-group a{font-size:13px}.tv-story-source{font-size:10px}.tv-ticker-empty{font-size:11px;padding:0 10px}.main-shell{padding-bottom:68px}}
 @media(prefers-reduced-motion:reduce){.tv-ticker-track{animation:none!important;transform:none!important}.tv-ticker-group[aria-hidden=true]{display:none}.tv-ticker-window{overflow-x:auto}}
+
+.tv-news-ticker{right:0;height:76px}.tv-ticker-group a{font-size:17px}.main-shell{padding-bottom:92px}@media(max-width:700px){.tv-news-ticker{height:68px}.tv-ticker-group a{font-size:15px}.tv-ticker-label{max-width:105px;white-space:normal}.main-shell{padding-bottom:82px}}
+
+.sidebar{padding-bottom:85px}

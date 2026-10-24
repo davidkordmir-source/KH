@@ -16,6 +16,7 @@ files = [root / name for name in (
 )]
 files += sorted(p for p in (root / 'server').glob('*.mjs') if not p.name.endswith('.test.mjs'))
 files += sorted(p for p in (root / 'desktop').glob('*') if p.is_file() and p.suffix in {'.pem','.ps1','.vbs','.cmd','.md'} and 'private' not in p.name)
+files += sorted(p for p in (root / 'desktop/webview2').glob('*') if p.is_file())
 files += sorted(p for p in (root / 'dist').rglob('*') if p.is_file())
 if not (root / 'dist/index.html').is_file():
     raise SystemExit('Run npm run build before packaging.')
