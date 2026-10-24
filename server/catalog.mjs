@@ -8,6 +8,9 @@ const news = (id, name, url, countryCode, description) => ({
 const official = (id, name, url, countryCode, description) => ({
   ...news(id, name, url, countryCode, description), kind: 'official',
 });
+const officialWebsite = (id, name, url, countryCode, description) => ({
+  ...official(id, name, url, countryCode, description), collection: 'website', platform: 'website', availability: 'reference-only',
+});
 
 export const SOURCE_CATALOG = Object.freeze([
   news('isna', 'ایسنا', 'https://www.isna.ir/rss', 'IR', 'خبرگزاری دانشجویان ایران؛ خوراک عمومی خبرها.'),
@@ -24,11 +27,20 @@ export const SOURCE_CATALOG = Object.freeze([
   news('bbc-world', 'BBC World', 'https://feeds.bbci.co.uk/news/world/rss.xml', 'GB', 'خوراک انگلیسی خبرهای جهان بی‌بی‌سی.'),
   news('guardian', 'The Guardian', 'https://www.theguardian.com/world/rss', 'GB', 'خبرهای جهان گاردین؛ آرشیو تاریخی جداگانه به API رسمی نیاز دارد.'),
   news('aljazeera', 'Al Jazeera', 'https://www.aljazeera.com/xml/rss/all.xml', 'QA', 'خبرهای انگلیسی الجزیره از خوراک عمومی ناشر.'),
-  official('white-house', 'کاخ سفید — اطلاعیه‌ها', 'https://www.whitehouse.gov/feed/', 'US', 'مطالب منتشرشده در وب‌سایت رسمی کاخ سفید؛ روایت رسمی منتشرکننده است و تأیید مستقل خبر محسوب نمی‌شود.'),
+  officialWebsite('white-house', 'کاخ سفید — ریاست‌جمهوری آمریکا', 'https://www.whitehouse.gov/briefings-statements/', 'US', 'اطلاعیه‌ها و اظهارات ریاست‌جمهوری آمریکا؛ پیوند وب‌سایت رسمی، بدون ادعای اتصال خودکار RSS.'),
   official('uk-prime-minister', 'دفتر نخست‌وزیر بریتانیا', 'https://www.gov.uk/government/organisations/prime-ministers-office-10-downing-street.atom', 'GB', 'خوراک رسمی GOV.UK از اطلاعیه‌ها و سخنرانی‌های دفتر نخست‌وزیر؛ ممکن است ناشر دسترسی خودکار را محدود کند.'),
   official('kremlin', 'ریاست‌جمهوری روسیه — کرملین', 'https://en.kremlin.ru/events/president/news/feed', 'RU', 'اطلاعیه‌ها و سخنرانی‌های منتشرشده در وب‌سایت رسمی ریاست‌جمهوری روسیه؛ بدون دسترسی خصوصی به حساب‌ها.'),
+  officialWebsite('israel-prime-minister', 'دفتر نخست‌وزیر اسرائیل', 'https://www.gov.il/en/departments/prime_ministers_office/govil-landing-page', 'IL', 'صفحهٔ رسمی دفتر نخست‌وزیر در درگاه دولت اسرائیل؛ مشاهدهٔ مستقیم اطلاعیه‌ها در سایت منبع.'),
+  officialWebsite('israel-foreign-ministry', 'وزارت امور خارجهٔ اسرائیل', 'https://www.gov.il/en/departments/ministry_of_foreign_affairs/govil-landing-page', 'IL', 'صفحهٔ رسمی وزارت امور خارجه در درگاه دولت؛ دریافت خودکار فید برای این پیوند تأیید نشده است.'),
+  officialWebsite('china-foreign-ministry', 'وزارت امور خارجهٔ چین — نشست‌های خبری', 'https://www.fmprc.gov.cn/eng/xw/fyrbt/', 'CN', 'نشست‌ها و اظهارات سخنگوی وزارت امور خارجهٔ چین؛ پیوند مستقیم وب‌سایت رسمی، بدون ادعای اتصال خودکار.'),
+  officialWebsite('china-state-council', 'دولت چین — شورای دولتی', 'https://english.www.gov.cn/news/', 'CN', 'درگاه انگلیسی دولت و شورای دولتی چین؛ خبرها و اطلاعیه‌های منتشرکنندهٔ رسمی.'),
   official('un-news', 'اخبار سازمان ملل', 'https://news.un.org/feed/subscribe/en/news/all/rss.xml', '', 'منبع رسمی سازمان ملل، نهادی بین‌المللی و نه دولت یک کشور؛ مطالب عمومی انگلیسی.'),
 ]);
+
+export const OFFICIAL_WEBSITES = Object.freeze({
+  'uk-prime-minister': 'https://www.gov.uk/government/organisations/prime-ministers-office-10-downing-street',
+  kremlin: 'https://en.kremlin.ru/events/president/news',
+});
 
 export const CATALOG_HOSTS = Object.freeze([...new Set(SOURCE_CATALOG.map(source => new URL(source.url).hostname))]);
 

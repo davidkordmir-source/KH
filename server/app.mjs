@@ -6,7 +6,7 @@ import { parseFeed, cleanText, categoryFor, discoverFeedUrl } from './feeds.mjs'
 import { Store, CAPABILITIES } from './store.mjs';
 import { validatePlatformConnection, collectPlatformArticles } from './platforms.mjs';
 import { createMarketsService } from './markets.mjs';
-import { SOURCE_CATALOG } from './catalog.mjs';
+import { SOURCE_CATALOG, OFFICIAL_WEBSITES } from './catalog.mjs';
 import { createArchiveService } from './archive-provider.mjs';
 import { customCapabilities, validateCustomConnection, collectCustomArticles } from './custom-connectors.mjs';
 import { createTelegramMediaService } from './telegram-media.mjs';
@@ -216,10 +216,11 @@ export function createApp({ directory = path.resolve('.data'), distDirectory = p
     res.json(await archive.connectGuardian(req.body.token));
   }));
   app.post('/api/archive/import', route(async (req, res) => res.json(await archive.importDay(req.body || {}))));
-  app.get('/api/catalog', (_req, res) => res.json({ sources: SOURCE_CATALOG }));
+  app.get('/api/catalog', (_req, res) => res.json({ sources: SOURCE_CATALOG.map(source => ({ ...source, websiteUrl: OFFICIAL_WEBSITES[source.id] || source.url })) }));
   app.post('/api/catalog/:id/add', route(async (req, res) => {
     const entry = SOURCE_CATALOG.find(item => item.id === req.params.id);
     if (!entry) return res.status(404).json({ error: 'منبع در فهرست وجود ندارد.' });
+    if (entry.collection === 'website') return res.status(422).json({ error: 'این مورد پیوند وب‌سایت رسمی است و اتصال خودکار فید برای آن فعال نیست. از «مشاهدهٔ سایت رسمی» استفاده کنید.' });
     const feedUrl = await checkedFeed(entry.url, entry.name);
     const existing = store.sources().find(item => item.url === feedUrl || item.url === entry.url);
     if (existing) {

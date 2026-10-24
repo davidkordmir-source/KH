@@ -33,7 +33,7 @@ test('catalog distinguishes publisher country from story location and exposes re
   for (const source of SOURCE_CATALOG) {
     assert.equal(new URL(source.url).protocol, 'https:');
     assert.equal(new URL(source.iconUrl).origin, new URL(source.url).origin);
-    assert.equal(source.availability, 'check-on-add');
+    assert.equal(source.availability, source.collection === 'website' ? 'reference-only' : 'check-on-add');
     assert.ok(!('locations' in source));
     assert.ok(CATALOG_HOSTS.includes(new URL(source.url).hostname));
   }
@@ -44,6 +44,17 @@ test('archive dates validate leap days and reject rolled-over or malformed dates
   for (const date of ['2025-02-29', '2024-02-30', '2024-3-20', '2024-13-01', '2024-03-20T00:00:00Z', '../secret', null]) {
     assert.throws(() => validateArchiveDate(date));
   }
+});
+
+test('official directory covers five requested countries and distinguishes websites from feeds', () => {
+  for (const code of ['US','GB','IL','RU','CN']) assert.ok(SOURCE_CATALOG.some(item => item.kind === 'official' && item.countryCode === code), code);
+  const israel=findCatalogSource('israel-prime-minister');
+  const china=findCatalogSource('china-foreign-ministry');
+  assert.equal(new URL(israel.url).hostname,'www.gov.il');
+  assert.equal(new URL(china.url).hostname,'www.fmprc.gov.cn');
+  assert.equal(israel.collection,'website');assert.equal(china.collection,'website');
+  assert.equal(findCatalogSource('white-house').collection,'website');
+  assert.ok(findCatalogSource('uk-prime-minister').url.endsWith('.atom'));
 });
 
 test('Guardian records preserve real media, source dates and exact Tehran day boundaries', () => {

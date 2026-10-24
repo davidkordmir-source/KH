@@ -31,6 +31,17 @@ async function fixture(t, { fetcher = async () => EMPTY_FEED } = {}) {
   return { ...instance, request };
 }
 
+test('official website references cannot be misreported as active feed connections', async t => {
+  let reads=0;
+  const {request}=await fixture(t,{fetcher:async()=>{reads++;throw new Error('Unexpected fetch');}});
+  const catalog=await(await request('/api/catalog')).json();
+  for (const code of ['US','GB','IL','RU','CN']) assert.ok(catalog.sources.some(item=>item.kind==='official'&&item.countryCode===code));
+  assert.equal(catalog.sources.find(item=>item.id==='kremlin').websiteUrl,'https://en.kremlin.ru/events/president/news');
+  const response=await request('/api/catalog/israel-prime-minister/add','POST',{});
+  assert.equal(response.status,422);assert.equal(reads,0);
+  assert.match((await response.json()).error,/وب‌سایت رسمی/);
+});
+
 test('saved API returns authoritative canonical records and honors unsaving after ingestion', async t => {
   const { store, request } = await fixture(t);
   store.addArticles([record('canonical-old', '2020-01-01T00:00:00.000Z'), record('newer', '2026-10-23T10:00:00.000Z')]);
