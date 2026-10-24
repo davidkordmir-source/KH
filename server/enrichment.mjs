@@ -98,7 +98,7 @@ export function breakingScore(title, description = '') {
 export function enrichArticle(article) {
   return {
     ...article,
-    summaryAuto: extractiveSummary(article.title, article.summary),
+    summaryAuto: extractiveSummary(article.title, article.fullText || article.summary),
     summaryMethod: 'extractive',
     summaryInput: article.summary ? 'feed-description' : 'headline',
     locations: detectLocations(`${article.title || ''} ${article.summary || ''}`),

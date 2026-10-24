@@ -10,6 +10,9 @@ import { SOURCE_CATALOG, OFFICIAL_WEBSITES } from './catalog.mjs';
 import { createArchiveService } from './archive-provider.mjs';
 import { customCapabilities, validateCustomConnection, collectCustomArticles } from './custom-connectors.mjs';
 import { createTelegramMediaService } from './telegram-media.mjs';
+import { createNewsroom } from './newsroom.mjs';
+import { createBackupService } from './backups.mjs';
+import { archiveFilters, registerNewsroomRoutes } from './newsroom-routes.mjs';
 
 const API_HOSTS = ['api.telegram.org', 'api.x.com', 'api.twitter.com', 'graph.facebook.com', 'graph.instagram.com', 'api.linkedin.com'];
 const idFor = value => createHash('sha256').update(value).digest('hex').slice(0, 24);
@@ -25,7 +28,8 @@ export function createApp({ directory = path.resolve('.data'), distDirectory = p
     if (!allowedHosts.has(req.hostname.toLowerCase())) return res.status(403).json({ error: 'نام میزبان برای این برنامه مجاز نیست.' });
     next();
   });
-  app.use(express.json({ limit: '20kb' }));
+  app.use('/api/newsroom/backups/restore', express.json({ limit: '96mb' }));
+  app.use(express.json({ limit: '64kb' }));
   app.use('/api', (req, res, next) => {
     res.setHeader('Cache-Control', 'no-store');
     res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -48,6 +52,8 @@ export function createApp({ directory = path.resolve('.data'), distDirectory = p
   }
 
   const markets = createMarketsService({ fetcher });
+  const newsroom = createNewsroom({store,markets,fetcher});
+  const backups = createBackupService(store);
   const archive = createArchiveService({ store, fetcher });
   const telegramMedia = createTelegramMediaService({ store, requestJson, fetchBinary: (url, options = {}) => fetcher(url, { ...options, responseType: 'buffer', allowedHosts: ['api.telegram.org'] }) });
   const customConnections = () => store.getSetting('customConnections', []);
@@ -78,6 +84,10 @@ export function createApp({ directory = path.resolve('.data'), distDirectory = p
     if (input.platform !== undefined) {
       if (typeof input.platform !== 'string' || !/^[a-z0-9_-]{1,30}$/i.test(input.platform)) throw new Error('نام پلتفرم معتبر نیست.');
       metadata.platform = input.platform;
+    }
+    for (const field of ['language','topics','publisher']) if(input[field]!==undefined) {
+      if(typeof input[field]!=='string'||input[field].length>(field==='topics'?200:100))throw new Error('مشخصات منبع معتبر نیست.');
+      metadata[field]=input[field].trim();
     }
     return metadata;
   }
@@ -192,7 +202,10 @@ export function createApp({ directory = path.resolve('.data'), distDirectory = p
         } catch (error) { errors.push({ sourceId: item.id, sourceName: item.label, message: publicError(error) }); }
       }
       store.setSetting('lastSyncAt', new Date().toISOString());
+      for(const feed of await newsroom.calendarService.sync())if(feed.lastError)errors.push({sourceId:feed.id,sourceName:feed.name,message:feed.lastError});
       store.setSetting('syncErrors', errors);
+      await newsroom.evaluate();
+      try { backups.snapshot(); } catch { store.setSetting('backupError','پشتیبان خودکار انجام نشد؛ فضای دیسک و دسترسی پوشه را بررسی کنید.'); }
       return dashboard();
     })().finally(() => { pendingSync = null; });
     return pendingSync;
@@ -207,7 +220,8 @@ export function createApp({ directory = path.resolve('.data'), distDirectory = p
     if ((country && (typeof country !== 'string' || !/^[a-z]{2}$/i.test(country))) || (city && (typeof city !== 'string' || city.length > 100)) || (query && (typeof query !== 'string' || query.length > 250))) return res.status(400).json({ error: 'فیلتر جست‌وجو معتبر نیست.' });
     const from = dateBound(dateFrom), to = dateBound(dateTo, true);
     if (from && to && from > to) return res.status(400).json({ error: 'ابتدای بازه باید پیش از انتهای آن باشد.' });
-    res.json(store.searchArchive({ dateFrom: from, dateTo: to, country, city, query, savedOnly: savedOnly === 'true', ...(read === 'true' || read === 'false' ? { read: read === 'true' } : {}), limit: Number(limit), offset: Number(offset) }));
+    const result=store.searchArchive({ ...archiveFilters(req.query,dateBound), limit: Number(limit), offset: Number(offset) });
+    res.json({...result,articles:result.articles.map(({fullText,...article})=>article)});
   }));
   app.get('/api/markets', route(async (req, res) => res.json(await markets.getMarkets({ force: req.query.refresh === '1' }))));
   app.get('/api/archive/status', (_req, res) => res.json(archive.status()));
@@ -341,6 +355,7 @@ export function createApp({ directory = path.resolve('.data'), distDirectory = p
     store.deleteConnection(req.params.platform);
     res.json({ ok: true });
   });
+  registerNewsroomRoutes({app,store,newsroom,backups,dateBound,fetcher,isSyncing:()=>Boolean(pendingSync)});
   app.use('/api', (_req, res) => res.status(404).json({ error: 'مسیر API پیدا نشد.' }));
   // ZIP releases can preserve identical size/mtime while their asset hashes change.
   // Never validate the entry document using a size/mtime-based weak ETag.
@@ -357,5 +372,5 @@ export function createApp({ directory = path.resolve('.data'), distDirectory = p
     if (error.type === 'entity.too.large') return res.status(413).json({ error: 'حجم درخواست بیش از حد مجاز است.' });
     res.status(error.status || 400).json({ error: publicError(error) });
   });
-  return { app, store, sync };
+  return { app, store, sync, newsroom, backups };
 }

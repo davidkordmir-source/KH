@@ -18,6 +18,7 @@ const TRUSTED_PROXY_HOSTS = new Set([
   'mastodon.social', 'tapi.bale.ai',
   'raw.githubusercontent.com',
   'api.gold-api.com', 'data-asg.goldprice.org',
+  'api.cognitive.microsofttranslator.com',
 ]);
 const proxyConfigured = () => Boolean(process.env.HTTPS_PROXY || process.env.https_proxy);
 

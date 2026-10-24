@@ -3,6 +3,7 @@ import L from 'leaflet';
 import { AlertCircle, ArrowUpLeft, Bookmark, CheckCheck, Globe2, LocateFixed, MapPin, X } from 'lucide-react';
 import 'leaflet/dist/leaflet.css';
 import './atlas.css';
+import { inputDate } from './newsroom-client';
 
 type Mention = { countryCode: string; countryName: string; city?: string; lat: number; lon: number; confidence?: string };
 type AtlasArticle = {
@@ -40,8 +41,30 @@ export default function AtlasPanel({ articles }: { articles: AtlasArticle[] }) {
   const [actionError, setActionError] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
   const [overrides, setOverrides] = useState<Record<string, { saved?: boolean; read?: boolean }>>({});
+  const [range, setRange] = useState({from:'',to:''});
+  const [archived, setArchived] = useState<AtlasArticle[] | null>(null);
+  const [archiveTotal, setArchiveTotal] = useState(0);
+  const [rangeBusy, setRangeBusy] = useState(false);
+  const rangeRequest = useRef<AbortController | null>(null);
+  useEffect(() => () => rangeRequest.current?.abort(), []);
+  const pool = archived ?? articles;
+  async function applyRange() {
+    rangeRequest.current?.abort(); const controller = new AbortController(); rangeRequest.current = controller;
+    setActionError('');
+    try {
+      const from=inputDate(range.from),to=inputDate(range.to);
+      if(from&&to&&from>to)throw new Error('ابتدای بازه باید پیش از انتهای آن باشد.');
+      if(!from&&!to){setArchived(null);setRangeBusy(false);return;}
+      setRangeBusy(true);
+      const params=new URLSearchParams({limit:'1000',...(from?{dateFrom:from}:{}),...(to?{dateTo:to}:{})});
+      const response=await fetch(`/api/articles?${params}`,{signal:controller.signal});const result=await response.json();
+      if(!response.ok)throw new Error(result.error||'دریافت بازهٔ نقشه انجام نشد.');
+      if(!controller.signal.aborted){setArchived(result.articles);setArchiveTotal(result.total);setCity('');}
+    }catch(error){if(!controller.signal.aborted)setActionError((error as Error).message);}
+    finally{if(!controller.signal.aborted)setRangeBusy(false);}
+  }
 
-  const located = useMemo(() => articles.filter(article => article.locations?.some(location => Number.isFinite(location.lat) && Number.isFinite(location.lon))), [articles]);
+  const located = useMemo(() => pool.filter(article => article.locations?.some(location => Number.isFinite(location.lat) && Number.isFinite(location.lon))), [pool]);
   const counts = useMemo(() => {
     const result = new Map<string, number>();
     for (const article of located) {
@@ -118,7 +141,8 @@ export default function AtlasPanel({ articles }: { articles: AtlasArticle[] }) {
     countriesLayer.current?.setStyle(feature => {
       const code = featureCode(feature?.properties);
       const selected = code === country;
-      return { color: selected ? '#dc7859' : '#768e95', weight: selected ? 2.4 : 1, fillColor: selected ? '#e68362' : counts.has(code) ? '#368d7b' : '#d7e4e7', fillOpacity: selected ? 0.36 : counts.has(code) ? 0.23 : 0.08 };
+      const maximum=Math.max(1,...counts.values()),density=(counts.get(code)||0)/maximum;
+      return { color: selected ? '#dc7859' : '#768e95', weight: selected ? 2.4 : 1, fillColor: selected ? '#e68362' : counts.has(code) ? '#237e6e' : '#d7e4e7', fillOpacity: selected ? 0.55 : counts.has(code) ? 0.18+0.58*Math.sqrt(density) : 0.08 };
     });
     const layer = countryLayers.current.get(country);
     if (layer && 'getBounds' in layer && typeof layer.getBounds === 'function') {
@@ -173,6 +197,9 @@ export default function AtlasPanel({ articles }: { articles: AtlasArticle[] }) {
   return <section className="atlas-panel" aria-label="نقشهٔ خبر">
     <div className="atlas-intro"><div><span className="atlas-kicker"><Globe2 size={16} /> جغرافیای خبر</span><h2>جهان را از دریچهٔ خبر ببینید.</h2><p>روی کشور کلیک کنید یا یک شهر را انتخاب کنید تا خبرهای مرتبط در همین بخش نمایش داده شوند.</p></div><span className="atlas-count">{faNumber(located.length)} خبر دارای مکان ذکرشده</span></div>
     <div className="atlas-controls">
+      <label>از تاریخ<input aria-label="از تاریخ نقشه" dir="ltr" placeholder="1403/01/01" value={range.from} onChange={event=>setRange({...range,from:event.target.value})}/></label>
+      <label>تا تاریخ<input aria-label="تا تاریخ نقشه" dir="ltr" placeholder="2026-10-24" value={range.to} onChange={event=>setRange({...range,to:event.target.value})}/></label>
+      <button className="secondary-button" disabled={rangeBusy} onClick={()=>void applyRange()}>{rangeBusy?'دریافت آرشیو…':'اعمال بازهٔ نقشه'}</button>
       <label>کشور<select aria-label="کشور روی نقشه" value={country} onChange={event => { setCountry(event.target.value); setCity(''); }}><option value="">همهٔ کشورها</option>{countries.map(item => <option key={item.code} value={item.code}>{item.name} {counts.get(item.code) ? `(${faNumber(counts.get(item.code)!)})` : ''}</option>)}</select></label>
       <label>شهر<select aria-label="شهر روی نقشه" value={city} onChange={event => setCity(event.target.value)}><option value="">همهٔ شهرها</option>{cities.map(name => <option key={name} value={name}>{name}</option>)}</select></label>
       {(country || city) && <button className="secondary-button" onClick={() => { setCountry(''); setCity(''); }}><X size={15} />پاک کردن فیلتر</button>}
@@ -180,7 +207,7 @@ export default function AtlasPanel({ articles }: { articles: AtlasArticle[] }) {
     </div>
     <div className="atlas-map-wrap"><div className="atlas-map" ref={element} aria-label="نقشهٔ OpenStreetMap با کشورها و مکان‌های ذکرشده در خبرها" />{!mapReady && !mapError && <div className="atlas-loading">در حال آماده‌سازی مرزهای کشورها…</div>}</div>
     {(mapError || tilesUnavailable) && <div className="atlas-notice" role="status"><AlertCircle size={17} /><p>{mapError || 'کاشی‌های نقشه در دسترس نیستند؛ مرز کشورها و فیلتر خبرها همچنان قابل استفاده‌اند.'}</p></div>}
-    <p className="atlas-method"><MapPin size={15} />نقاط، محل نام‌برده‌شده در متن خبر را به‌صورت تقریبی نشان می‌دهند؛ مکان دقیق رویداد یا موقعیت اشخاص نیستند. {faNumber(articles.length - located.length)} خبر بارگذاری‌شده هنوز مکان قابل تشخیص ندارد.</p>
+    <p className="atlas-method"><MapPin size={15} />نقاط، محل نام‌برده‌شده در متن خبر را به‌صورت تقریبی نشان می‌دهند؛ مکان دقیق رویداد یا موقعیت اشخاص نیستند. {faNumber(pool.length - located.length)} خبر بارگذاری‌شده هنوز مکان قابل تشخیص ندارد. تیرگی سبز، تعداد نسبی خبرهای مرتبط با هر کشور را نشان می‌دهد.{archived!==null?` نمایش ${faNumber(pool.length)} خبر از ${faNumber(archiveTotal)} نتیجهٔ بازه؛ سقف بارگذاری نقشه هزار خبر است.`:''}</p>
     <div className="atlas-results-heading"><h3>{city ? `خبرهای مرتبط با ${city}` : country ? `خبرهای مرتبط با ${selectedName}` : 'خبرهای دارای مکان'}</h3><span>{faNumber(results.length)} خبر در داده‌های بارگذاری‌شده</span></div>
     {actionError && <p className="atlas-error" role="alert">{actionError}</p>}
     {results.length ? <div className="atlas-results">{results.slice(0, 50).map(article => {

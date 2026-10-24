@@ -142,17 +142,18 @@ export function parseFeed(xml, source, now = new Date()) {
     if (!url || !title || seen.has(url)) return [];
     seen.add(url);
     const summary = cleanText(item.description || item.summary || item['content:encoded'] || item.content).slice(0, 1600);
+    const fullText = cleanText(item['content:encoded'] || item.content || item.description || item.summary).slice(0, 60000);
     const rawDate = text(item.pubDate || item.published || item.updated || item['dc:date']);
     const date = new Date(rawDate);
     const publishedAtKnown = !Number.isNaN(date.getTime());
     const media = extractFeedMedia(item, url);
     const imageUrl = media.find(entry => entry.type === 'image')?.url || media.find(entry => entry.poster)?.poster || null;
     return [{
-      id: createHash('sha256').update(url).digest('hex').slice(0, 24), title, summary, url, imageUrl, media, sourceIconUrl,
+      id: createHash('sha256').update(url).digest('hex').slice(0, 24), title, summary, fullText, textScope: 'publisher-feed', url, imageUrl, media, sourceIconUrl,
       sourceId: source.id, sourceName: source.name, platform: source.platform || 'rss',
       publishedAt: publishedAtKnown ? date.toISOString() : now.toISOString(), publishedAtKnown,
       category: categoryFor(`${title} ${summary} ${list(item.category).map(text).join(' ')}`),
-      language: /[\u0600-\u06ff]/.test(title) ? 'fa' : 'en', saved: false,
+      language: (source.language || text(item['@_xml:lang'] || root['@_xml:lang'] || root.language)).toLowerCase().split(/[-_]/)[0] || (/[\u0400-\u04ff]/.test(title) ? 'ru' : /[\u4e00-\u9fff]/.test(title) ? 'zh' : /[\u0600-\u06ff]/.test(title) ? 'fa' : 'en'), saved: false,
     }];
   });
 }

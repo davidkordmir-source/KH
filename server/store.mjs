@@ -3,6 +3,7 @@ import { mkdirSync, existsSync, readFileSync, writeFileSync, chmodSync } from 'n
 import path from 'node:path';
 import { randomBytes, randomUUID, createHash, createCipheriv, createDecipheriv } from 'node:crypto';
 import { enrichArticle, storyFingerprint } from './enrichment.mjs';
+import { initializeSearch, searchExpression } from './search.mjs';
 
 export const DEFAULT_SOURCES = [
   { id: 'bbc-persian', name: 'بی‌بی‌سی فارسی', url: 'https://feeds.bbci.co.uk/persian/rss.xml', iconUrl: 'https://www.bbc.com/favicon.ico', countryCode: 'GB' },
@@ -55,6 +56,10 @@ export class Store {
     this.db.exec('PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;');
     const oldArticles = this.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='articles'").get();
     const oldColumns = oldArticles ? this.db.prepare('PRAGMA table_info(articles)').all().map(column => column.name) : [];
+    if(oldArticles && oldColumns.includes('fingerprint') && !this.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='research_items'").get()) {
+      const backup=path.join(directory,'news.pre-v3.sqlite');
+      if(!existsSync(backup)){this.db.prepare('VACUUM INTO ?').run(backup);chmodSync(backup,0o600);}
+    }
     if (oldArticles && !oldColumns.includes('fingerprint')) {
       // VACUUM INTO takes a consistent snapshot including WAL, unlike copying a live database file.
       const backup = path.join(directory, 'news.pre-v2.sqlite');
@@ -96,16 +101,30 @@ export class Store {
         this.db.exec('COMMIT');
       } catch (error) { this.db.exec('ROLLBACK'); throw error; }
     }
+    addColumns('sources', { language: "TEXT NOT NULL DEFAULT ''", topics: "TEXT NOT NULL DEFAULT ''", publisher: "TEXT NOT NULL DEFAULT ''" });
+    this.db.exec(`CREATE TABLE IF NOT EXISTS article_versions(id INTEGER PRIMARY KEY,article_id TEXT NOT NULL,title TEXT NOT NULL,body TEXT NOT NULL,captured_at TEXT NOT NULL);
+      CREATE INDEX IF NOT EXISTS versions_article ON article_versions(article_id);
+      CREATE TABLE IF NOT EXISTS research_items(article_id TEXT PRIMARY KEY,folder TEXT NOT NULL DEFAULT '',note TEXT NOT NULL DEFAULT '',tags TEXT NOT NULL DEFAULT '[]',review TEXT NOT NULL DEFAULT 'unchecked',evidence_url TEXT NOT NULL DEFAULT '',review_note TEXT NOT NULL DEFAULT '',updated_at TEXT);
+      CREATE TABLE IF NOT EXISTS profiles(id TEXT PRIMARY KEY,payload TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS watch_rules(id TEXT PRIMARY KEY,payload TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS news_alerts(id TEXT PRIMARY KEY,rule_id TEXT NOT NULL,group_key TEXT NOT NULL,payload TEXT NOT NULL,created_at TEXT NOT NULL,read INTEGER NOT NULL DEFAULT 0,UNIQUE(rule_id,group_key));
+      CREATE INDEX IF NOT EXISTS alerts_date ON news_alerts(created_at);
+      CREATE TABLE IF NOT EXISTS translations(cache_key TEXT PRIMARY KEY,payload TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS calendar_events(id TEXT PRIMARY KEY,payload TEXT NOT NULL);`);
+    this.db.exec('CREATE TABLE IF NOT EXISTS saved_searches(id TEXT PRIMARY KEY,payload TEXT NOT NULL)');
+    addColumns('research_items',{primary_url:"TEXT NOT NULL DEFAULT ''"});
+    initializeSearch(this);
   }
   close() { this.db.close(); }
   getSetting(key, fallback = null) { const row = this.db.prepare('SELECT value FROM settings WHERE key=?').get(key); return row ? JSON.parse(row.value) : fallback; }
   setSetting(key, value) { this.db.prepare('INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run(key, json(value)); }
   sources() {
-    return this.db.prepare('SELECT * FROM sources ORDER BY rowid').all().map(row => ({ id: row.id, name: row.name, url: row.url, platform: row.platform || 'rss', enabled: Boolean(row.enabled), lastFetchedAt: row.last_fetched_at, lastError: row.last_error, priority: row.priority || 0, kind: row.kind || 'news', iconUrl: row.icon_url || null, countryCode: row.country_code || null }));
+    return this.db.prepare('SELECT * FROM sources ORDER BY rowid').all().map(row => ({ id: row.id, name: row.name, url: row.url, platform: row.platform || 'rss', enabled: Boolean(row.enabled), lastFetchedAt: row.last_fetched_at, lastError: row.last_error, priority: row.priority || 0, kind: row.kind || 'news', iconUrl: row.icon_url || null, countryCode: row.country_code || null, language: row.language, topics: row.topics, publisher: row.publisher }));
   }
-  addSource({ name, url, enabled = true, priority = 0, kind = 'news', iconUrl = null, countryCode = null, platform = 'rss' }) {
+  addSource({ name, url, enabled = true, priority = 0, kind = 'news', iconUrl = null, countryCode = null, platform = 'rss', language = '', topics = '', publisher = '' }) {
     const id = randomUUID();
     this.db.prepare('INSERT INTO sources(id,name,url,enabled,priority,kind,icon_url,country_code,platform) VALUES(?,?,?,?,?,?,?,?,?)').run(id, name, url, Number(Boolean(enabled)), boundedNumber(priority, 0, 3), ['news', 'official', 'social'].includes(kind) ? kind : 'news', safeIcon(iconUrl), typeof countryCode === 'string' ? countryCode.toUpperCase().slice(0, 2) : null, platform);
+    this.updateSource(id,{language,topics,publisher});
     return this.sources().find(source => source.id === id);
   }
   updateSource(id, values) {
@@ -118,13 +137,14 @@ export class Store {
     if (typeof patch.name === 'string' && patch.name.trim()) add('name', patch.name.trim().slice(0, 100));
     if (Object.hasOwn(patch, 'iconUrl')) add('icon_url', safeIcon(patch.iconUrl));
     if (typeof patch.countryCode === 'string' && /^[A-Za-z]{2}$/.test(patch.countryCode)) add('country_code', patch.countryCode.toUpperCase());
+    for (const field of ['language', 'topics', 'publisher']) if (typeof patch[field] === 'string') add(field, patch[field].trim().slice(0, field === 'topics' ? 200 : 100));
     if (!assignments.length) return 0;
     return this.db.prepare(`UPDATE sources SET ${assignments.join(',')} WHERE id=?`).run(...parameters, id).changes;
   }
   deleteSource(id) { return this.db.prepare('DELETE FROM sources WHERE id=?').run(id).changes; }
   markSource(id, error = null) { this.db.prepare('UPDATE sources SET last_error=?,last_fetched_at=CASE WHEN ? IS NULL THEN ? ELSE last_fetched_at END WHERE id=?').run(error, error, new Date().toISOString(), id); }
   addArticles(articles) {
-    const existingUrl = this.db.prepare('SELECT id FROM articles WHERE url=?');
+    const existingUrl = this.db.prepare('SELECT id,payload FROM articles WHERE url=?');
     const existingId = this.db.prepare('SELECT url FROM articles WHERE id=?');
     const story = this.db.prepare('SELECT read,read_at FROM story_state WHERE fingerprint=?');
     const insert = this.db.prepare(`INSERT INTO articles(id,url,payload,published_at,fingerprint,date_known,read,read_at,read_inherited) VALUES(?,?,?,?,?,?,?,?,?)
@@ -134,9 +154,16 @@ export class Store {
     try {
       for (const input of articles) {
         if (!input?.url || !input.title) continue;
-        let id = existingUrl.get(input.url)?.id || input.id || createHash('sha256').update(input.url).digest('hex').slice(0, 24);
+        const previous = existingUrl.get(input.url);
+        let id = previous?.id || input.id || createHash('sha256').update(input.url).digest('hex').slice(0, 24);
         if (existingId.get(id)?.url && existingId.get(id).url !== input.url) id = createHash('sha256').update(input.url).digest('hex').slice(0, 24);
         const article = enrichArticle({ ...input, id });
+        if (previous) {
+          const old = JSON.parse(previous.payload);
+          if (old.title !== article.title || (old.fullText || old.summary) !== (article.fullText || article.summary)) {
+            this.db.prepare('INSERT INTO article_versions(article_id,title,body,captured_at) VALUES(?,?,?,?)').run(id, old.title, old.fullText || old.summary || '', new Date().toISOString());
+          }
+        }
         const fingerprint = storyFingerprint(article.title, id, article.publishedAtKnown === false ? null : article.publishedAt);
         const state = story.get(fingerprint);
         insert.run(id, article.url, json(article), article.publishedAt || new Date().toISOString(), fingerprint, Number(article.publishedAtKnown !== false), Number(Boolean(state?.read)), state?.read_at || null, Number(Boolean(state?.read)));
@@ -181,10 +208,17 @@ export class Store {
     if (filters.city) { clauses.push("EXISTS(SELECT 1 FROM json_each(a.payload,'$.locations') l WHERE lower(json_extract(l.value,'$.city'))=lower(?))"); parameters.push(String(filters.city)); }
     if (filters.sourceId) { clauses.push("json_extract(a.payload,'$.sourceId')=?"); parameters.push(String(filters.sourceId)); }
     if (filters.platform) { clauses.push("json_extract(a.payload,'$.platform')=?"); parameters.push(String(filters.platform)); }
+    if (filters.language) { clauses.push("json_extract(a.payload,'$.language')=?"); parameters.push(String(filters.language)); }
+    if (filters.category) { clauses.push("json_extract(a.payload,'$.category')=?"); parameters.push(String(filters.category)); }
+    if (filters.hasMedia) clauses.push("json_array_length(json_extract(a.payload,'$.media'))>0");
+    if (filters.folder) { clauses.push('EXISTS(SELECT 1 FROM research_items r WHERE r.article_id=a.id AND r.folder=?)'); parameters.push(String(filters.folder)); }
+    if (filters.exclude) {
+      const expression = searchExpression(filters.exclude);
+      if (expression) { clauses.push('a.id NOT IN (SELECT id FROM news_search WHERE news_search MATCH ?)'); parameters.push(expression.replaceAll(' AND ', ' OR ')); }
+    }
     if (filters.query) {
-      clauses.push("(json_extract(a.payload,'$.title') LIKE ? ESCAPE '\\' OR json_extract(a.payload,'$.summary') LIKE ? ESCAPE '\\' OR json_extract(a.payload,'$.sourceName') LIKE ? ESCAPE '\\')");
-      const term = `%${String(filters.query).replace(/[\\%_]/g, value => `\\${value}`)}%`;
-      parameters.push(term, term, term);
+      const expression = searchExpression(filters.query);
+      if (expression) { clauses.push('a.id IN (SELECT id FROM news_search WHERE news_search MATCH ?)'); parameters.push(expression); }
     }
     return { sql: clauses.length ? ` WHERE ${clauses.join(' AND ')}` : '', parameters };
   }
@@ -195,6 +229,7 @@ export class Store {
     return this.db.prepare(query).all(...where.parameters).map(parsePayload);
   }
   savedArticles() { return this.articles({ savedOnly: true }); }
+  article(id) { const row = this.db.prepare(`${selectArticles} WHERE a.id=?`).get(id); return row ? parsePayload(row) : null; }
   searchArchive(filters = {}) {
     const limit = boundedNumber(filters.limit, 100, 1000), offset = boundedNumber(filters.offset, 0, Number.MAX_SAFE_INTEGER);
     const where = this._where(filters);
@@ -220,6 +255,6 @@ export class Store {
     const recent = this.articles({ limit: 1000 });
     const all = [...new Map([...recent, ...this.savedArticles()].map(article => [article.id, article])).values()].sort((a, b) => b.publishedAt.localeCompare(a.publishedAt));
     const coverage = this.archiveCoverage();
-    return { articles: all, sources: this.sources(), connections: this.connections(), keywords: this.getSetting('keywords', []), lastSyncAt: this.getSetting('lastSyncAt'), syncErrors: this.getSetting('syncErrors', []), articleCount: coverage.articleCount, archiveCoverage: coverage };
+    return { articles: all.map(({fullText,...article})=>article), sources: this.sources(), connections: this.connections(), keywords: this.getSetting('keywords', []), lastSyncAt: this.getSetting('lastSyncAt'), syncErrors: this.getSetting('syncErrors', []), articleCount: coverage.articleCount, archiveCoverage: coverage };
   }
 }
