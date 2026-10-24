@@ -1,0 +1,10 @@
+Map tiles: OpenStreetMap contributors.
+https://www.openstreetmap.org/copyright
+
+Country boundaries: Natural Earth 1:110m Admin 0 Countries.
+Public domain dataset, source maintained at:
+https://github.com/nvkelso/natural-earth-vector/blob/master/geojson/ne_110m_admin_0_countries.geojson
+https://www.naturalearthdata.com/about/terms-of-use/
+
+The displayed markers use approximate country/city centers for place names mentioned
+in news text. They do not represent verified incident coordinates or person locations.

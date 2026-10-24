@@ -1,5 +1,7 @@
 import { createHash } from 'node:crypto';
+import { isIP } from 'node:net';
 import { XMLParser, XMLValidator } from 'fast-xml-parser';
+import { isPublicAddress } from './network.mjs';
 
 const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '@_', textNodeName: '#text', parseTagValue: false, trimValues: true });
 const list = value => !value ? [] : Array.isArray(value) ? value : [value];
@@ -44,16 +46,82 @@ export function categoryFor(value) {
   return groups.find(([, pattern]) => pattern.test(input))?.[0] || 'world';
 }
 
-function imageFor(item) {
-  const media = [...list(item['media:content']), ...list(item['media:thumbnail']), ...list(item.enclosure)];
-  for (const entry of media) {
-    const value = entry?.['@_url'];
-    if (value && (!entry['@_type'] || entry['@_type'].startsWith('image/'))) {
-      const url = normalizeArticleUrl(value);
-      if (url?.startsWith('https://')) return url;
+/** Public source-supplied media only; never manufacture a decorative image. */
+export function safeMediaUrl(value, base) {
+  try {
+    if (!value || typeof value !== 'string') return null;
+    const url = new URL(value.replace(/&amp;/g, '&').trim(), base);
+    const host = url.hostname.replace(/^\[|\]$/g, '').replace(/\.$/, '').toLowerCase();
+    if (url.protocol !== 'https:' || url.username || url.password || (url.port && url.port !== '443')) return null;
+    if (host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local') || host.endsWith('.internal') || (isIP(host) && !isPublicAddress(host))) return null;
+    return url.href;
+  } catch { return null; }
+}
+
+function attributesFor(tag) {
+  const attributes = {};
+  for (const match of tag.matchAll(/([\w:-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/g)) attributes[match[1].toLowerCase()] = match[2] ?? match[3] ?? match[4];
+  return attributes;
+}
+
+function kindFor(url, mime = '', medium = '') {
+  if (/^video\//i.test(mime) || medium === 'video') return 'video';
+  if (/^image\//i.test(mime) || medium === 'image') return 'image';
+  try {
+    const path = new URL(url).pathname;
+    if (/\.(mp4|webm|ogv|mov)$/i.test(path)) return 'video';
+    if (/\.(jpe?g|png|gif|webp|avif|svg)$/i.test(path)) return 'image';
+  } catch { /* Unknown media types are omitted rather than guessed. */ }
+  return null;
+}
+
+export function extractFeedMedia(item, articleUrl) {
+  const found = [];
+  const add = (type, value, mimeType, poster) => {
+    const url = safeMediaUrl(value, articleUrl);
+    if (!url || !['image', 'video'].includes(type)) return;
+    if (type === 'video' && /^(?:www\.|m\.)?(?:youtube\.com|youtube-nocookie\.com|youtu\.be)$/i.test(new URL(url).hostname)) return;
+    if (found.some(media => media.url === url)) return;
+    found.push({ type, url, ...(mimeType && /^(?:image|video)\/[a-z0-9.+-]+$/i.test(mimeType) ? { mimeType } : {}), ...(type === 'video' && safeMediaUrl(poster, articleUrl) ? { poster: safeMediaUrl(poster, articleUrl) } : {}), source: 'feed' });
+  };
+  const visit = (node, depth = 0) => {
+    if (!node || typeof node !== 'object' || depth > 3) return;
+    const thumbnail = list(node['media:thumbnail']).find(entry => entry?.['@_url'])?.['@_url'];
+    for (const entry of [...list(node['media:content']), ...list(node.enclosure), ...list(node.link).filter(link => link?.['@_rel'] === 'enclosure')]) {
+      const value = entry?.['@_url'] || entry?.['@_href'];
+      const url = safeMediaUrl(value, articleUrl);
+      const kind = url && kindFor(url, entry['@_type'], entry['@_medium']);
+      add(kind, value, entry?.['@_type'], list(entry?.['media:thumbnail'])[0]?.['@_url'] || thumbnail);
+    }
+    for (const entry of list(node['media:thumbnail'])) add('image', entry?.['@_url']);
+    for (const group of list(node['media:group'])) visit(group, depth + 1);
+  };
+  visit(item);
+  // Images/videos embedded by the publisher in RSS content are real article media.
+  const html = [item.description, item.summary, item['content:encoded'], item.content].map(text).join('\n').slice(0, 200_000);
+  for (const match of html.matchAll(/<img\b[^>]*>/gi)) {
+    const a = attributesFor(match[0]);
+    if ((a.width && Number(a.width) <= 2) || (a.height && Number(a.height) <= 2)) continue;
+    add('image', safeMediaUrl(a.src, articleUrl) ? a.src : a['data-src'], undefined);
+  }
+  for (const match of html.matchAll(/<video\b([^>]*)>([\s\S]*?)<\/video>|<video\b([^>]*)\/?>/gi)) {
+    const a = attributesFor(match[1] || match[3] || '');
+    if (a.src) add('video', a.src, a.type, a.poster);
+    for (const tag of (match[2] || '').match(/<source\b[^>]*>/gi) || []) {
+      const source = attributesFor(tag);
+      if (source.src) add('video', source.src, source.type, a.poster);
     }
   }
-  return null;
+  return found.slice(0, 12);
+}
+
+function sourceIconFor(root, source) {
+  const explicit = source.iconUrl || text(root.image?.url) || text(root.logo) || text(root.icon);
+  const supplied = safeMediaUrl(explicit, source.url);
+  if (supplied) return supplied;
+  const link = list(root.link).find(entry => typeof entry === 'string') || list(root.link).find(entry => entry?.['@_rel'] === 'alternate');
+  const site = safeMediaUrl(typeof link === 'string' ? link : link?.['@_href'], source.url) || safeMediaUrl(source.url);
+  return site ? new URL('/favicon.ico', site).href : null;
 }
 
 export function parseFeed(xml, source, now = new Date()) {
@@ -63,6 +131,7 @@ export function parseFeed(xml, source, now = new Date()) {
   const root = document.rss?.channel || document.feed || document['rdf:RDF'];
   if (!root) throw new Error('منبع باید نشانی RSS یا Atom باشد، نه صفحهٔ وب.');
   const items = list(root.item || root.entry || document['rdf:RDF']?.item);
+  const sourceIconUrl = sourceIconFor(root, source);
   const seen = new Set();
   return items.slice(0, 150).flatMap(item => {
     const links = list(item.link);
@@ -76,8 +145,10 @@ export function parseFeed(xml, source, now = new Date()) {
     const rawDate = text(item.pubDate || item.published || item.updated || item['dc:date']);
     const date = new Date(rawDate);
     const publishedAtKnown = !Number.isNaN(date.getTime());
+    const media = extractFeedMedia(item, url);
+    const imageUrl = media.find(entry => entry.type === 'image')?.url || media.find(entry => entry.poster)?.poster || null;
     return [{
-      id: createHash('sha256').update(url).digest('hex').slice(0, 24), title, summary, url, imageUrl: imageFor(item),
+      id: createHash('sha256').update(url).digest('hex').slice(0, 24), title, summary, url, imageUrl, media, sourceIconUrl,
       sourceId: source.id, sourceName: source.name, platform: source.platform || 'rss',
       publishedAt: publishedAtKnown ? date.toISOString() : now.toISOString(), publishedAtKnown,
       category: categoryFor(`${title} ${summary} ${list(item.category).map(text).join(' ')}`),

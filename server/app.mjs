@@ -1,10 +1,15 @@
 import express from 'express';
 import path from 'node:path';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { safeFetch, validatePublicUrl } from './network.mjs';
 import { parseFeed, cleanText, categoryFor, discoverFeedUrl } from './feeds.mjs';
 import { Store, CAPABILITIES } from './store.mjs';
 import { validatePlatformConnection, collectPlatformArticles } from './platforms.mjs';
+import { createMarketsService } from './markets.mjs';
+import { SOURCE_CATALOG } from './catalog.mjs';
+import { createArchiveService } from './archive-provider.mjs';
+import { customCapabilities, validateCustomConnection, collectCustomArticles } from './custom-connectors.mjs';
+import { createTelegramMediaService } from './telegram-media.mjs';
 
 const API_HOSTS = ['api.telegram.org', 'api.x.com', 'api.twitter.com', 'graph.facebook.com', 'graph.instagram.com', 'api.linkedin.com'];
 const idFor = value => createHash('sha256').update(value).digest('hex').slice(0, 24);
@@ -37,8 +42,57 @@ export function createApp({ directory = path.resolve('.data'), distDirectory = p
   });
 
   async function requestJson(url, options = {}) {
-    const body = await fetcher(url, { ...options, allowedHosts: API_HOSTS, maxBytes: 3_000_000 });
+    const body = await fetcher(url, { ...options, allowedHosts: options.allowedHosts || API_HOSTS, maxBytes: 3_000_000 });
     try { return JSON.parse(body); } catch { throw new Error('پاسخ API معتبر نیست.'); }
+  }
+
+  const markets = createMarketsService({ fetcher });
+  const archive = createArchiveService({ store, fetcher });
+  const telegramMedia = createTelegramMediaService({ store, requestJson, fetchBinary: (url, options = {}) => fetcher(url, { ...options, responseType: 'buffer', allowedHosts: ['api.telegram.org'] }) });
+  const customConnections = () => store.getSetting('customConnections', []);
+  const dashboard = () => ({ ...store.dashboard(), customConnections: customConnections().map(({ id, type, label, description }) => ({ id, type, label, description, connected: true })) });
+
+  function dateBound(value, end = false) {
+    if (!value) return undefined;
+    if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) throw new Error('تاریخ باید به قالب YYYY-MM-DD باشد.');
+    const date = new Date(`${value}T00:00:00Z`);
+    if (!Number.isFinite(date.getTime()) || date.toISOString().slice(0, 10) !== value) throw new Error('تاریخ معتبر نیست.');
+    return new Date(`${value}T${end ? '23:59:59.999' : '00:00:00.000'}+03:30`).toISOString();
+  }
+
+  function sourceMetadata(input = {}) {
+    const metadata = {};
+    if (input.kind !== undefined) {
+      if (!['news', 'official', 'social'].includes(input.kind)) throw new Error('نوع منبع معتبر نیست.');
+      metadata.kind = input.kind;
+    }
+    if (input.priority !== undefined) {
+      if (!Number.isInteger(input.priority) || input.priority < 0 || input.priority > 3) throw new Error('اولویت باید بین صفر و سه باشد.');
+      metadata.priority = input.priority;
+    }
+    if (input.countryCode !== undefined) {
+      if (typeof input.countryCode !== 'string' || !/^[A-Za-z]{2}$/.test(input.countryCode)) throw new Error('کد کشور معتبر نیست.');
+      metadata.countryCode = input.countryCode.toUpperCase();
+    }
+    if (input.platform !== undefined) {
+      if (typeof input.platform !== 'string' || !/^[a-z0-9_-]{1,30}$/i.test(input.platform)) throw new Error('نام پلتفرم معتبر نیست.');
+      metadata.platform = input.platform;
+    }
+    return metadata;
+  }
+
+  async function checkedFeed(rawUrl, name) {
+    const { url } = await urlValidator(rawUrl);
+    let feedUrl = url.href;
+    let contents = await fetcher(feedUrl);
+    if (/<!doctype\s+html|<html[\s>]/i.test(contents)) {
+      const discovered = discoverFeedUrl(contents, feedUrl);
+      if (!discovered) throw new Error('در این سایت فید عمومی RSS یا Atom پیدا نشد.');
+      feedUrl = (await urlValidator(discovered)).url.href;
+      contents = await fetcher(feedUrl);
+    }
+    parseFeed(contents, { id: 'validation', name });
+    return feedUrl;
   }
 
   function normalizeCollected(items, platform) {
@@ -62,7 +116,8 @@ export function createApp({ directory = path.resolve('.data'), distDirectory = p
       const channelPath = chat.username || (String(chat.id).startsWith('-100') ? `c/${String(chat.id).slice(4)}` : null);
       if (!channelPath) continue;
       const url = `https://t.me/${channelPath}/${message.message_id}`;
-      articles.push({ id: idFor(url), title: body.slice(0, 180), summary: body.slice(0, 1600), url, imageUrl: null, sourceId: `telegram:${chat.id}`, sourceName: chat.title || chat.username || 'تلگرام', platform: 'telegram', publishedAt: new Date(message.date * 1000).toISOString(), category: categoryFor(body), language: /[\u0600-\u06ff]/.test(body) ? 'fa' : 'en', saved: false });
+      const media = telegramMedia.mediaForMessage(message);
+      articles.push({ id: idFor(url), title: body.slice(0, 180), summary: body.slice(0, 1600), url, media, imageUrl: media.find(item => item.type === 'image')?.url || null, sourceId: `telegram:${chat.id}`, sourceName: chat.title || chat.username || 'تلگرام', platform: 'telegram', publishedAt: new Date(message.date * 1000).toISOString(), category: categoryFor(body), language: /[\u0600-\u06ff]/.test(body) ? 'fa' : 'en', saved: false });
     }
     store.addArticles(articles);
     if (result.result.length) store.setConnection('telegram', connection.label, { token: connection.token, channels: connection.channels || [], offset: Math.max(...result.result.map(update => update.update_id)) + 1 });
@@ -78,15 +133,22 @@ export function createApp({ directory = path.resolve('.data'), distDirectory = p
     }
     const query = terms.join(' OR ');
     const url = new URL('https://api.x.com/2/tweets/search/recent');
-    url.search = new URLSearchParams({ query: `(${query}) -is:retweet`, max_results: '30', 'tweet.fields': 'created_at,lang,author_id', expansions: 'author_id', 'user.fields': 'name,username' });
+    url.search = new URLSearchParams({ query: `(${query}) -is:retweet`, max_results: '30', 'tweet.fields': 'created_at,lang,author_id,attachments', expansions: 'author_id,attachments.media_keys', 'user.fields': 'name,username', 'media.fields': 'type,url,preview_image_url,variants' });
     const result = await requestJson(url.href, { headers: { Authorization: `Bearer ${connection.token}` } });
     if (result.errors?.length && !result.data) throw new Error('طرح API حساب X اجازهٔ جست‌وجوی خبر را نمی‌دهد.');
     const users = new Map((result.includes?.users || []).map(user => [user.id, user]));
+    const mediaById = new Map((result.includes?.media || []).map(item => [item.media_key, item]));
     store.addArticles((result.data || []).map(tweet => {
       const user = users.get(tweet.author_id);
       const url = `https://x.com/${user?.username || 'i/web'}/status/${tweet.id}`;
       const body = cleanText(tweet.text);
-      return { id: idFor(url), title: body.slice(0, 180), summary: body.slice(0, 1600), url, imageUrl: null, sourceId: `x:${tweet.author_id}`, sourceName: user?.name || 'X', platform: 'x', publishedAt: tweet.created_at || new Date().toISOString(), category: categoryFor(body), language: tweet.lang === 'fa' ? 'fa' : 'en', saved: false };
+      const media = (tweet.attachments?.media_keys || []).flatMap(key => {
+        const item = mediaById.get(key);
+        const candidate = item?.type === 'photo' ? item.url : item?.variants?.filter(variant => variant.content_type === 'video/mp4').sort((a, b) => (a.bit_rate || 0) - (b.bit_rate || 0))[0]?.url;
+        if (!candidate?.startsWith('https://')) return [];
+        return [{ type: item.type === 'photo' ? 'image' : 'video', url: candidate, poster: item.preview_image_url || undefined, source: 'official-api' }];
+      });
+      return { id: idFor(url), title: body.slice(0, 180), summary: body.slice(0, 1600), url, media, imageUrl: media.find(item => item.type === 'image')?.url || null, sourceId: `x:${tweet.author_id}`, sourceName: user?.name || 'X', platform: 'x', publishedAt: tweet.created_at || new Date().toISOString(), category: categoryFor(body), language: tweet.lang === 'fa' ? 'fa' : 'en', saved: false };
     }));
   }
 
@@ -99,7 +161,7 @@ export function createApp({ directory = path.resolve('.data'), distDirectory = p
       await Promise.all(sources.map(async source => {
         try {
           const xml = await fetcher(source.url);
-          store.addArticles(parseFeed(xml, source));
+          store.addArticles(parseFeed(xml, source).map(article => ({ ...article, sourceKind: source.kind, sourceIconUrl: article.sourceIconUrl || source.iconUrl, sourcePriority: source.priority || 0 })));
           store.markSource(source.id);
         } catch (error) {
           const message = publicError(error);
@@ -119,40 +181,98 @@ export function createApp({ directory = path.resolve('.data'), distDirectory = p
           }
         } catch (error) { errors.push({ sourceId: connectionInfo.platform, sourceName: connectionInfo.label || connectionInfo.platform, message: publicError(error) }); }
       }
+      for (const item of customConnections()) {
+        try {
+          const connection = store.getConnection(`custom:${item.id}`);
+          const articles = await collectCustomArticles(item.type, connection, store.getSetting('keywords', []), requestJson);
+          store.addArticles(normalizeCollected(articles, item.type));
+          if (articles.nextCredentials) store.setConnection(`custom:${item.id}`, item.label, articles.nextCredentials);
+          for (const message of articles.warnings || []) errors.push({ sourceId: item.id, sourceName: item.label, message });
+        } catch (error) { errors.push({ sourceId: item.id, sourceName: item.label, message: publicError(error) }); }
+      }
       store.setSetting('lastSyncAt', new Date().toISOString());
       store.setSetting('syncErrors', errors);
-      return store.dashboard();
+      return dashboard();
     })().finally(() => { pendingSync = null; });
     return pendingSync;
   }
 
   app.get('/api/health', (_req, res) => res.json({ status: 'ok', storage: 'sqlite' }));
-  app.get('/api/dashboard', (_req, res) => res.json(store.dashboard()));
+  app.get('/api/dashboard', (_req, res) => res.json(dashboard()));
+  app.get('/api/saved', (_req, res) => res.json({ articles: store.savedArticles() }));
+  app.get('/api/articles', route(async (req, res) => {
+    const { dateFrom, dateTo, country, city, query, savedOnly, read, limit = '50', offset = '0' } = req.query;
+    if (!/^\d{1,4}$/.test(String(limit)) || Number(limit) < 1 || Number(limit) > 1000 || !/^\d{1,9}$/.test(String(offset))) return res.status(400).json({ error: 'بازهٔ صفحه‌بندی معتبر نیست.' });
+    if ((country && (typeof country !== 'string' || !/^[a-z]{2}$/i.test(country))) || (city && (typeof city !== 'string' || city.length > 100)) || (query && (typeof query !== 'string' || query.length > 250))) return res.status(400).json({ error: 'فیلتر جست‌وجو معتبر نیست.' });
+    const from = dateBound(dateFrom), to = dateBound(dateTo, true);
+    if (from && to && from > to) return res.status(400).json({ error: 'ابتدای بازه باید پیش از انتهای آن باشد.' });
+    res.json(store.searchArchive({ dateFrom: from, dateTo: to, country, city, query, savedOnly: savedOnly === 'true', ...(read === 'true' || read === 'false' ? { read: read === 'true' } : {}), limit: Number(limit), offset: Number(offset) }));
+  }));
+  app.get('/api/markets', route(async (req, res) => res.json(await markets.getMarkets({ force: req.query.refresh === '1' }))));
+  app.get('/api/archive/status', (_req, res) => res.json(archive.status()));
+  app.post('/api/archive/guardian/connect', route(async (req, res) => {
+    if (typeof req.body?.token !== 'string' || req.body.token.length < 5 || req.body.token.length > 500) return res.status(400).json({ error: 'کلید دسترسی Guardian معتبر نیست.' });
+    res.json(await archive.connectGuardian(req.body.token));
+  }));
+  app.post('/api/archive/import', route(async (req, res) => res.json(await archive.importDay(req.body || {}))));
+  app.get('/api/catalog', (_req, res) => res.json({ sources: SOURCE_CATALOG }));
+  app.post('/api/catalog/:id/add', route(async (req, res) => {
+    const entry = SOURCE_CATALOG.find(item => item.id === req.params.id);
+    if (!entry) return res.status(404).json({ error: 'منبع در فهرست وجود ندارد.' });
+    const feedUrl = await checkedFeed(entry.url, entry.name);
+    const existing = store.sources().find(item => item.url === feedUrl || item.url === entry.url);
+    if (existing) {
+      store.updateSource(existing.id, { enabled: true, kind: entry.kind, iconUrl: entry.iconUrl, countryCode: entry.countryCode });
+      return res.json({ source: store.sources().find(item => item.id === existing.id), alreadyExists: true });
+    }
+    if (store.sources().length >= 100) return res.status(400).json({ error: 'حداکثر صد منبع قابل ثبت است.' });
+    res.status(201).json({ source: store.addSource({ ...entry, url: feedUrl }) });
+  }));
+  app.get('/api/connectors', (_req, res) => res.json({ connectors: Object.entries(customCapabilities).map(([type, value]) => typeof value === 'string' ? { type, name: type, description: value } : { type, ...value }) }));
+  app.post('/api/custom-connections', route(async (req, res) => {
+    const { type, label, token, instanceUrl, accountId, actor } = req.body || {};
+    if (!Object.hasOwn(customCapabilities, type)) return res.status(400).json({ error: 'نوع اتصال پشتیبانی نمی‌شود.' });
+    if ((label !== undefined && (typeof label !== 'string' || label.length > 100)) || (token !== undefined && (typeof token !== 'string' || token.length > 4096 || /[\r\n]/.test(token))) || [instanceUrl, accountId, actor].some(value => value !== undefined && (typeof value !== 'string' || value.length > 1000))) return res.status(400).json({ error: 'مشخصات اتصال معتبر نیست.' });
+    const registry = customConnections();
+    if (registry.length >= 25) return res.status(400).json({ error: 'حداکثر ۲۵ اتصال سفارشی قابل ثبت است.' });
+    if (instanceUrl) await urlValidator(instanceUrl);
+    const credentials = { token, instanceUrl, accountId: accountId || actor, actor };
+    const validated = await validateCustomConnection(type, credentials, requestJson);
+    const id = randomUUID();
+    const name = label?.trim() || validated.label || type;
+    store.setConnection(`custom:${id}`, name, validated.normalizedCredentials || credentials);
+    store.setSetting('customConnections', [...registry, { id, type, label: name, description: validated.capability || '' }]);
+    res.status(201).json({ id, type, label: name, connected: true });
+  }));
+  app.delete('/api/custom-connections/:id', (req, res) => {
+    store.deleteConnection(`custom:${req.params.id}`);
+    store.setSetting('customConnections', customConnections().filter(item => item.id !== req.params.id));
+    res.json({ ok: true });
+  });
+  app.get('/api/media/telegram/:id', route(async (req, res) => {
+    const media = await telegramMedia.fetchMedia(req.params.id);
+    res.setHeader('Cache-Control', 'private, max-age=300');
+    res.type(media.contentType).send(media.data);
+  }));
   app.post('/api/sync', route(async (_req, res) => res.json(await sync())));
   app.post('/api/sources', route(async (req, res) => {
     const { name, url } = req.body || {};
     if (typeof name !== 'string' || !name.trim() || name.length > 100 || typeof url !== 'string' || url.length > 2048) return res.status(400).json({ error: 'نام و نشانی RSS معتبر را وارد کنید.' });
-    const { url: parsed } = await urlValidator(url);
-    if (store.sources().length >= 50) return res.status(400).json({ error: 'حداکثر ۵۰ منبع قابل ثبت است.' });
-    let feedUrl = parsed.href;
-    let contents = await fetcher(feedUrl);
-    if (/<!doctype\s+html|<html[\s>]/i.test(contents)) {
-      const discovered = discoverFeedUrl(contents, feedUrl);
-      if (!discovered) return res.status(400).json({ error: 'در این سایت فید RSS یا Atom پیدا نشد. نشانی مستقیم فید را وارد کنید.' });
-      const validated = await urlValidator(discovered);
-      feedUrl = validated.url.href;
-      contents = await fetcher(feedUrl);
-    }
-    parseFeed(contents, { id: 'validation', name: name.trim() });
+    const metadata = sourceMetadata(req.body);
+    if (store.sources().length >= 100) return res.status(400).json({ error: 'حداکثر صد منبع قابل ثبت است.' });
+    const feedUrl = await checkedFeed(url, name.trim());
     if (store.sources().some(source => source.url === feedUrl)) return res.status(409).json({ error: 'این منبع قبلاً اضافه شده است.' });
-    const source = store.addSource({ name: name.trim(), url: feedUrl });
+    const source = store.addSource({ name: name.trim(), url: feedUrl, ...metadata, iconUrl: `${new URL(feedUrl).origin}/favicon.ico` });
     res.status(201).json(source);
   }));
-  app.patch('/api/sources/:id', (req, res) => {
-    if (typeof req.body?.enabled !== 'boolean') return res.status(400).json({ error: 'وضعیت منبع معتبر نیست.' });
-    if (!store.updateSource(req.params.id, req.body.enabled)) return res.status(404).json({ error: 'منبع پیدا نشد.' });
+  app.patch('/api/sources/:id', route(async (req, res) => {
+    const metadata = sourceMetadata(req.body);
+    if (req.body?.enabled !== undefined && typeof req.body.enabled !== 'boolean') return res.status(400).json({ error: 'وضعیت منبع معتبر نیست.' });
+    if (typeof req.body?.enabled === 'boolean') metadata.enabled = req.body.enabled;
+    if (!Object.keys(metadata).length) return res.status(400).json({ error: 'تغییری برای منبع ارسال نشده است.' });
+    if (!store.updateSource(req.params.id, metadata)) return res.status(404).json({ error: 'منبع پیدا نشد.' });
     res.json({ ok: true });
-  });
+  }));
   app.delete('/api/sources/:id', (req, res) => {
     if (!store.deleteSource(req.params.id)) return res.status(404).json({ error: 'منبع پیدا نشد.' });
     res.json({ ok: true });
@@ -160,6 +280,23 @@ export function createApp({ directory = path.resolve('.data'), distDirectory = p
   app.post('/api/articles/:id/save', (req, res) => {
     if (typeof req.body?.saved !== 'boolean') return res.status(400).json({ error: 'وضعیت ذخیره‌سازی معتبر نیست.' });
     if (!store.saveArticle(req.params.id, req.body.saved)) return res.status(404).json({ error: 'خبر پیدا نشد.' });
+    res.json({ ok: true });
+  });
+  app.post('/api/articles/:id/read', (req, res) => {
+    if (typeof req.body?.read !== 'boolean') return res.status(400).json({ error: 'وضعیت خواندن معتبر نیست.' });
+    const updated = store.markRead(req.params.id, req.body.read);
+    if (!updated) return res.status(404).json({ error: 'خبر پیدا نشد.' });
+    res.json({ ok: true, updated });
+  });
+  app.post('/api/articles/seen', (req, res) => {
+    const ids = req.body?.ids;
+    if (!Array.isArray(ids) || ids.length > 100 || ids.some(id => typeof id !== 'string' || !id || id.length > 256)) return res.status(400).json({ error: 'شناسه‌های خبر معتبر نیستند.' });
+    res.json({ ok: true, updated: store.markSeen(ids) });
+  });
+  app.post('/api/articles/:id/priority', (req, res) => {
+    const priority = req.body?.priority;
+    if (!Number.isInteger(priority) || priority < 0 || priority > 3) return res.status(400).json({ error: 'اولویت باید بین صفر و سه باشد.' });
+    if (!store.setArticlePriority(req.params.id, priority)) return res.status(404).json({ error: 'خبر پیدا نشد.' });
     res.json({ ok: true });
   });
   app.put('/api/keywords', (req, res) => {

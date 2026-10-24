@@ -3,6 +3,8 @@
  * store. The injected JSON requester provides the application's proxy/timeouts.
  * These connectors never scrape private timelines or impersonate a browser.
  */
+import { safeMediaUrl } from './feeds.mjs';
+
 const META_VERSION = process.env.META_GRAPH_VERSION || 'v23.0';
 const LINKEDIN_VERSION = process.env.LINKEDIN_API_VERSION || '202601';
 const SUPPORTED = new Set(['instagram', 'facebook', 'linkedin']);
@@ -86,10 +88,7 @@ function cleanText(value, max = 12000) {
 }
 
 function safeUrl(value) {
-  try {
-    const url = new URL(String(value));
-    return url.protocol === 'https:' && !url.username && !url.password ? url.href : null;
-  } catch { return null; }
+  return safeMediaUrl(value);
 }
 
 function article(platform, record, label, accountId) {
@@ -98,12 +97,21 @@ function article(platform, record, label, accountId) {
   if (!text || !url) return null;
   const date = new Date(record.date);
   if (!Number.isFinite(date.getTime())) return null;
+  const seen = new Set();
+  const media = (record.media || [{ type: 'image', url: record.imageUrl }]).flatMap(item => {
+    const url = safeUrl(item.url);
+    if (!url || !['image', 'video'].includes(item.type) || seen.has(url)) return [];
+    seen.add(url);
+    const poster = safeUrl(item.poster);
+    return [{ type: item.type, url, ...(poster ? { poster } : {}), source: 'platform' }];
+  }).slice(0, 12);
   return {
     title: cleanText(text.split(/\n/)[0], 180),
     summary: text,
     url,
-    imageUrl: safeUrl(record.imageUrl),
-    publishedAt: date.toISOString(),
+    imageUrl: media.find(item => item.type === 'image')?.url || media.find(item => item.poster)?.poster || null,
+    media,
+    publishedAt: date.toISOString(), publishedAtKnown: true,
     platform,
     sourceId: `${platform}:${accountId}`,
     sourceName: label,
@@ -138,7 +146,7 @@ export async function collectPlatformArticles(platform, credentials, keywords, r
   let records;
   const warnings = [];
   if (platform === 'instagram') {
-    const fields = 'id,caption,media_type,media_url,permalink,timestamp';
+    const fields = 'id,caption,media_type,media_url,thumbnail_url,permalink,timestamp,children{id,media_type,media_url,thumbnail_url}';
     const data = await apiGet(platform, metaUrl(`${auth.accountId}/media`, { fields, limit: 25 }), auth.token, requestJson);
     if (!Array.isArray(data.data)) throw new PlatformAccessError('پاسخ رسانه‌های اینستاگرام معتبر نیست.', 502);
     records = [...data.data];
@@ -154,11 +162,24 @@ export async function collectPlatformArticles(platform, credentials, keywords, r
         warnings.push('دریافت هشتگ اینستاگرام ممکن نشد؛ این قابلیت به مجوز Instagram Public Content Access و محدودیت‌های Meta وابسته است.');
       }
     }
-    records = records.map(item => ({ text: item.caption, url: item.permalink, date: item.timestamp, imageUrl: item.media_type === 'VIDEO' ? null : item.media_url }));
+    records = records.map(item => ({ text: item.caption, url: item.permalink, date: item.timestamp,
+      media: [item, ...(Array.isArray(item.children?.data) ? item.children.data : [])].map(media => ({
+        type: media.media_type === 'VIDEO' ? 'video' : 'image', url: media.media_url,
+        ...(media.media_type === 'VIDEO' ? { poster: media.thumbnail_url } : {}),
+      })),
+    }));
   } else if (platform === 'facebook') {
-    const data = await apiGet(platform, metaUrl(`${auth.accountId}/posts`, { fields: 'id,message,created_time,permalink_url,full_picture', limit: 25 }), auth.token, requestJson);
+    const data = await apiGet(platform, metaUrl(`${auth.accountId}/posts`, { fields: 'id,message,created_time,permalink_url,full_picture,attachments{media,type,subattachments}', limit: 25 }), auth.token, requestJson);
     if (!Array.isArray(data.data)) throw new PlatformAccessError('پاسخ پست‌های فیسبوک معتبر نیست.', 502);
-    records = data.data.map(item => ({ text: item.message, url: item.permalink_url, date: item.created_time, imageUrl: item.full_picture }));
+    records = data.data.map(item => {
+      const attachments = (Array.isArray(item.attachments?.data) ? item.attachments.data : []).flatMap(entry => [entry, ...(Array.isArray(entry.subattachments?.data) ? entry.subattachments.data : [])]);
+      const media = [{ type: 'image', url: item.full_picture }];
+      for (const attachment of attachments) {
+        if (attachment.media?.image?.src) media.push({ type: 'image', url: attachment.media.image.src });
+        if (/video/i.test(attachment.type || '') && attachment.media?.source) media.push({ type: 'video', url: attachment.media.source, poster: attachment.media?.image?.src });
+      }
+      return { text: item.message, url: item.permalink_url, date: item.created_time, media };
+    });
   } else {
     const data = await apiGet(platform, linkedinUrl(auth.author), auth.token, requestJson);
     if (!Array.isArray(data.elements)) throw new PlatformAccessError('پاسخ پست‌های لینکدین معتبر نیست.', 502);

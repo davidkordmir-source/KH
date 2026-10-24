@@ -9,6 +9,15 @@ const TRUSTED_PROXY_HOSTS = new Set([
   'feeds.bbci.co.uk', 'www.theguardian.com', 'www.aljazeera.com',
   'api.telegram.org', 'api.x.com', 'api.twitter.com',
   'graph.facebook.com', 'graph.instagram.com', 'api.linkedin.com',
+  'query1.finance.yahoo.com', 'query2.finance.yahoo.com', 'stooq.com',
+  'content.guardianapis.com', 'www.isna.ir', 'www.irna.ir',
+  'www.mehrnews.com', 'www.tasnimnews.com', 'www.france24.com',
+  'rss.dw.com', 'www.dawn.com', 'www.cbc.ca', 'www.abc.net.au',
+  'www.thehindu.com', 'www.whitehouse.gov', 'www.gov.uk',
+  'en.kremlin.ru', 'news.un.org', 'public.api.bsky.app',
+  'mastodon.social', 'tapi.bale.ai',
+  'raw.githubusercontent.com',
+  'api.gold-api.com', 'data-asg.goldprice.org',
 ]);
 const proxyConfigured = () => Boolean(process.env.HTTPS_PROXY || process.env.https_proxy);
 
@@ -65,7 +74,7 @@ function createDispatcher(addresses) {
   } } }), close: true };
 }
 
-export async function safeFetch(value, { method = 'GET', headers = {}, body, maxBytes = 3_000_000, allowedHosts, timeoutMs = 18_000 } = {}) {
+export async function safeFetch(value, { method = 'GET', headers = {}, body, maxBytes = 3_000_000, allowedHosts, timeoutMs = 18_000, responseType = 'text' } = {}) {
   let current = value;
   for (let redirects = 0; redirects <= 3; redirects++) {
     const { url, addresses } = await validatePublicUrl(current);
@@ -99,7 +108,8 @@ export async function safeFetch(value, { method = 'GET', headers = {}, body, max
         if (bytes > maxBytes) throw new Error('حجم پاسخ منبع بیش از حد مجاز است.');
         chunks.push(chunk);
       }
-      return Buffer.concat(chunks).toString('utf8');
+      const result = Buffer.concat(chunks);
+      return responseType === 'buffer' ? result : result.toString('utf8');
     } catch (error) {
       if (error.name === 'TimeoutError' || error.name === 'AbortError') throw new Error('زمان انتظار برای پاسخ منبع به پایان رسید.');
       if (error.message === 'fetch failed') throw new Error('اتصال به منبع برقرار نشد؛ دسترسی شبکه را بررسی کنید.');

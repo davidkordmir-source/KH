@@ -80,7 +80,8 @@ test('the launcher waits for its own child readiness and serves the built app fr
   assert.match(await response.text(), /دیدبان/);
   const dashboard = await (await fetch(`http://127.0.0.1:${port}/api/dashboard`)).json();
   assert.equal(dashboard.articles.length, 0);
-  assert.equal(dashboard.sources.length, 4);
+  assert.equal(dashboard.sources.filter(source => source.enabled).length, 4);
+  assert.equal(dashboard.sources.filter(source => source.countryCode === 'IR').length, 4);
   // The log location is stable even when news data is moved elsewhere.
   assert.match(readFileSync(path.join(root, '.data', 'startup.log'), 'utf8'), /Dideban is ready:/);
 });

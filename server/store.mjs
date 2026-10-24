@@ -1,15 +1,21 @@
 import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync, existsSync, readFileSync, writeFileSync, chmodSync } from 'node:fs';
 import path from 'node:path';
-import { randomBytes, randomUUID, createCipheriv, createDecipheriv } from 'node:crypto';
+import { randomBytes, randomUUID, createHash, createCipheriv, createDecipheriv } from 'node:crypto';
+import { enrichArticle, storyFingerprint } from './enrichment.mjs';
 
 export const DEFAULT_SOURCES = [
-  { id: 'bbc-persian', name: 'بی‌بی‌سی فارسی', url: 'https://feeds.bbci.co.uk/persian/rss.xml' },
-  { id: 'bbc-world', name: 'BBC World', url: 'https://feeds.bbci.co.uk/news/world/rss.xml' },
-  { id: 'guardian', name: 'The Guardian', url: 'https://www.theguardian.com/world/rss' },
-  { id: 'aljazeera', name: 'Al Jazeera', url: 'https://www.aljazeera.com/xml/rss/all.xml' },
+  { id: 'bbc-persian', name: 'بی‌بی‌سی فارسی', url: 'https://feeds.bbci.co.uk/persian/rss.xml', iconUrl: 'https://www.bbc.com/favicon.ico', countryCode: 'GB' },
+  { id: 'bbc-world', name: 'BBC World', url: 'https://feeds.bbci.co.uk/news/world/rss.xml', iconUrl: 'https://www.bbc.com/favicon.ico', countryCode: 'GB' },
+  { id: 'guardian', name: 'The Guardian', url: 'https://www.theguardian.com/world/rss', iconUrl: 'https://www.theguardian.com/favicon.ico', countryCode: 'GB' },
+  { id: 'aljazeera', name: 'Al Jazeera', url: 'https://www.aljazeera.com/xml/rss/all.xml', iconUrl: 'https://www.aljazeera.com/favicon.ico', countryCode: 'QA' },
 ];
-
+export const IRANIAN_SOURCES = [
+  { id: 'isna', name: 'ایسنا', url: 'https://www.isna.ir/rss', iconUrl: 'https://www.isna.ir/favicon.ico', countryCode: 'IR' },
+  { id: 'irna', name: 'ایرنا', url: 'https://www.irna.ir/rss', iconUrl: 'https://www.irna.ir/favicon.ico', countryCode: 'IR' },
+  { id: 'mehr', name: 'مهر', url: 'https://www.mehrnews.com/rss', iconUrl: 'https://www.mehrnews.com/favicon.ico', countryCode: 'IR' },
+  { id: 'tasnim', name: 'تسنیم', url: 'https://www.tasnimnews.com/fa/rss/feed/0/8/0', iconUrl: 'https://www.tasnimnews.com/favicon.ico', countryCode: 'IR' },
+];
 export const CAPABILITIES = {
   telegram: 'ربات تلگرام؛ فقط پیام‌های جدید کانال‌ها و گروه‌هایی که ربات به آن‌ها دسترسی دارد، بدون تاریخچهٔ حساب شخصی.',
   x: 'API رسمی X با Bearer Token؛ جست‌وجوی ۷ روز اخیر بر اساس کلیدواژه‌ها و سطح دسترسی طرح API شما.',
@@ -18,49 +24,202 @@ export const CAPABILITIES = {
   linkedin: 'API رسمی LinkedIn؛ پست‌های سازمان مجاز با Access Token و شناسهٔ سازمان. نیازمند تأیید محصول API و دسترسی سازمان است.',
 };
 
+const json = value => JSON.stringify(value);
+const boundedNumber = (value, fallback, maximum) => Number.isFinite(Number(value)) ? Math.max(0, Math.min(maximum, Math.floor(Number(value)))) : fallback;
+const safeIcon = value => { try { const url = new URL(value); return url.protocol === 'https:' && !url.username && !url.password ? url.href : null; } catch { return null; } };
+const parsePayload = row => {
+  const payload = JSON.parse(row.payload);
+  return {
+    ...payload, id: row.id, url: row.url,
+    saved: Boolean(row.saved), seen: Boolean(row.seen), seenAt: row.seen_at || null, read: Boolean(row.read), readAt: row.read_at || null,
+    readInherited: Boolean(row.read_inherited), priority: row.priority || 0,
+    duplicateGroup: row.fingerprint?.startsWith('single:') ? null : row.fingerprint,
+    duplicateCount: Math.max(0, Number(row.group_count || 1) - 1),
+    duplicateOf: row.group_count > 1 && row.first_id !== row.id ? row.first_id : null,
+  };
+};
+const selectArticles = `SELECT a.*, (SELECT COUNT(*) FROM articles d WHERE d.fingerprint=a.fingerprint) AS group_count,
+  (SELECT d.id FROM articles d WHERE d.fingerprint=a.fingerprint ORDER BY d.published_at,d.id LIMIT 1) AS first_id FROM articles a`;
+
 export class Store {
   constructor(directory) {
+    this.directory = directory;
     mkdirSync(directory, { recursive: true, mode: 0o700 });
     const keyPath = path.join(directory, 'credentials.key');
     if (!existsSync(keyPath)) writeFileSync(keyPath, randomBytes(32), { mode: 0o600, flag: 'wx' });
     chmodSync(keyPath, 0o600);
     this.key = readFileSync(keyPath);
-    this.db = new DatabaseSync(path.join(directory, 'news.sqlite'));
-    chmodSync(path.join(directory, 'news.sqlite'), 0o600);
-    this.db.exec(`PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;
+    const databasePath = path.join(directory, 'news.sqlite');
+    this.db = new DatabaseSync(databasePath);
+    chmodSync(databasePath, 0o600);
+    this.db.exec('PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;');
+    const oldArticles = this.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='articles'").get();
+    const oldColumns = oldArticles ? this.db.prepare('PRAGMA table_info(articles)').all().map(column => column.name) : [];
+    if (oldArticles && !oldColumns.includes('fingerprint')) {
+      // VACUUM INTO takes a consistent snapshot including WAL, unlike copying a live database file.
+      const backup = path.join(directory, 'news.pre-v2.sqlite');
+      if (!existsSync(backup)) { this.db.prepare('VACUUM INTO ?').run(backup); chmodSync(backup, 0o600); }
+    }
+    this.db.exec(`
       CREATE TABLE IF NOT EXISTS sources(id TEXT PRIMARY KEY,name TEXT NOT NULL,url TEXT NOT NULL UNIQUE,enabled INTEGER NOT NULL DEFAULT 1,last_fetched_at TEXT,last_error TEXT);
       CREATE TABLE IF NOT EXISTS articles(id TEXT PRIMARY KEY,url TEXT NOT NULL UNIQUE,payload TEXT NOT NULL,saved INTEGER NOT NULL DEFAULT 0,published_at TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY,value TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS connections(platform TEXT PRIMARY KEY,label TEXT NOT NULL,secret TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS story_state(fingerprint TEXT PRIMARY KEY,read INTEGER NOT NULL DEFAULT 0,read_at TEXT);
     `);
-    if (!this.getSetting('initialized', false)) {
-      for (const source of DEFAULT_SOURCES) this.db.prepare('INSERT OR IGNORE INTO sources(id,name,url) VALUES(?,?,?)').run(source.id, source.name, source.url);
+    const addColumns = (table, columns) => {
+      const existing = new Set(this.db.prepare(`PRAGMA table_info(${table})`).all().map(column => column.name));
+      for (const [name, definition] of Object.entries(columns)) if (!existing.has(name)) this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${definition}`);
+    };
+    addColumns('articles', { seen: 'INTEGER NOT NULL DEFAULT 0', seen_at: 'TEXT', read: 'INTEGER NOT NULL DEFAULT 0', read_at: 'TEXT', read_inherited: 'INTEGER NOT NULL DEFAULT 0', priority: 'INTEGER NOT NULL DEFAULT 0', fingerprint: 'TEXT', date_known: 'INTEGER NOT NULL DEFAULT 1' });
+    addColumns('sources', { priority: 'INTEGER NOT NULL DEFAULT 0', kind: "TEXT NOT NULL DEFAULT 'news'", icon_url: 'TEXT', country_code: 'TEXT', platform: "TEXT NOT NULL DEFAULT 'rss'" });
+    this.db.exec('CREATE INDEX IF NOT EXISTS articles_fingerprint ON articles(fingerprint); CREATE INDEX IF NOT EXISTS articles_date ON articles(published_at); CREATE INDEX IF NOT EXISTS articles_saved ON articles(saved);');
+    const initialized = this.getSetting('initialized', false);
+    if (!initialized) {
+      for (const source of DEFAULT_SOURCES) this.db.prepare('INSERT OR IGNORE INTO sources(id,name,url,icon_url,country_code) VALUES(?,?,?,?,?)').run(source.id, source.name, source.url, source.iconUrl, source.countryCode);
       this.setSetting('keywords', ['ایران', 'هوش مصنوعی', 'اقتصاد']);
       this.setSetting('initialized', true);
+      this.setSetting('archiveStartedAt', new Date().toISOString());
+    }
+    if (this.getSetting('schemaVersion', 1) < 2) {
+      this.db.exec('BEGIN');
+      try {
+        const update = this.db.prepare('UPDATE articles SET payload=?,fingerprint=?,date_known=? WHERE id=?');
+        for (const row of this.db.prepare('SELECT id,url,payload FROM articles').all()) {
+          const article = enrichArticle({ ...JSON.parse(row.payload), id: row.id, url: row.url });
+          update.run(json(article), storyFingerprint(article.title, row.id, article.publishedAtKnown === false ? null : article.publishedAt), Number(article.publishedAtKnown !== false), row.id);
+        }
+        for (const source of DEFAULT_SOURCES) this.db.prepare('UPDATE sources SET icon_url=COALESCE(icon_url,?),country_code=COALESCE(country_code,?) WHERE id=?').run(source.iconUrl, source.countryCode, source.id);
+        // Available on upgrade, initially disabled so network policy and source choices remain explicit.
+        for (const source of IRANIAN_SOURCES) this.db.prepare('INSERT OR IGNORE INTO sources(id,name,url,enabled,icon_url,country_code) VALUES(?,?,?,0,?,?)').run(source.id, source.name, source.url, source.iconUrl, source.countryCode);
+        this.setSetting('schemaVersion', 2);
+        this.db.exec('COMMIT');
+      } catch (error) { this.db.exec('ROLLBACK'); throw error; }
     }
   }
   close() { this.db.close(); }
   getSetting(key, fallback = null) { const row = this.db.prepare('SELECT value FROM settings WHERE key=?').get(key); return row ? JSON.parse(row.value) : fallback; }
-  setSetting(key, value) { this.db.prepare('INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run(key, JSON.stringify(value)); }
-  sources() { return this.db.prepare('SELECT * FROM sources ORDER BY rowid').all().map(row => ({ id: row.id, name: row.name, url: row.url, platform: 'rss', enabled: Boolean(row.enabled), lastFetchedAt: row.last_fetched_at, lastError: row.last_error })); }
-  addSource({ name, url }) { const id = randomUUID(); this.db.prepare('INSERT INTO sources(id,name,url) VALUES(?,?,?)').run(id, name, url); return this.sources().find(source => source.id === id); }
-  updateSource(id, enabled) { return this.db.prepare('UPDATE sources SET enabled=? WHERE id=?').run(Number(enabled), id).changes; }
+  setSetting(key, value) { this.db.prepare('INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run(key, json(value)); }
+  sources() {
+    return this.db.prepare('SELECT * FROM sources ORDER BY rowid').all().map(row => ({ id: row.id, name: row.name, url: row.url, platform: row.platform || 'rss', enabled: Boolean(row.enabled), lastFetchedAt: row.last_fetched_at, lastError: row.last_error, priority: row.priority || 0, kind: row.kind || 'news', iconUrl: row.icon_url || null, countryCode: row.country_code || null }));
+  }
+  addSource({ name, url, enabled = true, priority = 0, kind = 'news', iconUrl = null, countryCode = null, platform = 'rss' }) {
+    const id = randomUUID();
+    this.db.prepare('INSERT INTO sources(id,name,url,enabled,priority,kind,icon_url,country_code,platform) VALUES(?,?,?,?,?,?,?,?,?)').run(id, name, url, Number(Boolean(enabled)), boundedNumber(priority, 0, 3), ['news', 'official', 'social'].includes(kind) ? kind : 'news', safeIcon(iconUrl), typeof countryCode === 'string' ? countryCode.toUpperCase().slice(0, 2) : null, platform);
+    return this.sources().find(source => source.id === id);
+  }
+  updateSource(id, values) {
+    const patch = typeof values === 'boolean' ? { enabled: values } : values || {};
+    const assignments = [], parameters = [];
+    const add = (column, value) => { assignments.push(`${column}=?`); parameters.push(value); };
+    if (typeof patch.enabled === 'boolean') add('enabled', Number(patch.enabled));
+    if (Number.isInteger(patch.priority) && patch.priority >= 0 && patch.priority <= 3) add('priority', patch.priority);
+    if (['news', 'official', 'social'].includes(patch.kind)) add('kind', patch.kind);
+    if (typeof patch.name === 'string' && patch.name.trim()) add('name', patch.name.trim().slice(0, 100));
+    if (Object.hasOwn(patch, 'iconUrl')) add('icon_url', safeIcon(patch.iconUrl));
+    if (typeof patch.countryCode === 'string' && /^[A-Za-z]{2}$/.test(patch.countryCode)) add('country_code', patch.countryCode.toUpperCase());
+    if (!assignments.length) return 0;
+    return this.db.prepare(`UPDATE sources SET ${assignments.join(',')} WHERE id=?`).run(...parameters, id).changes;
+  }
   deleteSource(id) { return this.db.prepare('DELETE FROM sources WHERE id=?').run(id).changes; }
   markSource(id, error = null) { this.db.prepare('UPDATE sources SET last_error=?,last_fetched_at=CASE WHEN ? IS NULL THEN ? ELSE last_fetched_at END WHERE id=?').run(error, error, new Date().toISOString(), id); }
   addArticles(articles) {
-    const insert = this.db.prepare('INSERT INTO articles(id,url,payload,published_at) VALUES(?,?,?,?) ON CONFLICT(url) DO UPDATE SET payload=excluded.payload,published_at=excluded.published_at');
+    const existingUrl = this.db.prepare('SELECT id FROM articles WHERE url=?');
+    const existingId = this.db.prepare('SELECT url FROM articles WHERE id=?');
+    const story = this.db.prepare('SELECT read,read_at FROM story_state WHERE fingerprint=?');
+    const insert = this.db.prepare(`INSERT INTO articles(id,url,payload,published_at,fingerprint,date_known,read,read_at,read_inherited) VALUES(?,?,?,?,?,?,?,?,?)
+      ON CONFLICT(url) DO UPDATE SET payload=excluded.payload,published_at=excluded.published_at,fingerprint=excluded.fingerprint,date_known=excluded.date_known`);
     this.db.exec('BEGIN');
-    try { for (const article of articles) insert.run(article.id, article.url, JSON.stringify(article), article.publishedAt); this.db.exec('COMMIT'); }
-    catch (error) { this.db.exec('ROLLBACK'); throw error; }
-    this.db.exec('DELETE FROM articles WHERE saved=0 AND id NOT IN (SELECT id FROM articles ORDER BY published_at DESC LIMIT 1500)');
+    let count = 0;
+    try {
+      for (const input of articles) {
+        if (!input?.url || !input.title) continue;
+        let id = existingUrl.get(input.url)?.id || input.id || createHash('sha256').update(input.url).digest('hex').slice(0, 24);
+        if (existingId.get(id)?.url && existingId.get(id).url !== input.url) id = createHash('sha256').update(input.url).digest('hex').slice(0, 24);
+        const article = enrichArticle({ ...input, id });
+        const fingerprint = storyFingerprint(article.title, id, article.publishedAtKnown === false ? null : article.publishedAt);
+        const state = story.get(fingerprint);
+        insert.run(id, article.url, json(article), article.publishedAt || new Date().toISOString(), fingerprint, Number(article.publishedAtKnown !== false), Number(Boolean(state?.read)), state?.read_at || null, Number(Boolean(state?.read)));
+        count++;
+      }
+      this.db.exec('COMMIT');
+    } catch (error) { this.db.exec('ROLLBACK'); throw error; }
+    return count;
   }
   saveArticle(id, saved) { return this.db.prepare('UPDATE articles SET saved=? WHERE id=?').run(Number(saved), id).changes; }
-  articles() { return this.db.prepare('SELECT payload,saved FROM articles ORDER BY published_at DESC LIMIT 2000').all().map(row => ({ ...JSON.parse(row.payload), saved: Boolean(row.saved) })); }
-  encrypt(value) { const iv = randomBytes(12); const cipher = createCipheriv('aes-256-gcm', this.key, iv); const ciphertext = Buffer.concat([cipher.update(JSON.stringify(value)), cipher.final()]); return [iv, cipher.getAuthTag(), ciphertext].map(part => part.toString('base64')).join('.'); }
+  markSeen(ids) {
+    if (!Array.isArray(ids) || ids.length > 100 || ids.some(id => typeof id !== 'string' || !id || id.length > 256)) throw new Error('حداکثر ۱۰۰ شناسهٔ خبر معتبر مجاز است.');
+    const unique = [...new Set(ids)];
+    if (!unique.length) return 0;
+    const placeholders = unique.map(() => '?').join(',');
+    return this.db.prepare(`UPDATE articles SET seen=1,seen_at=COALESCE(seen_at,?) WHERE id IN (${placeholders}) AND seen=0`).run(new Date().toISOString(), ...unique).changes;
+  }
+  markRead(id, read = true) {
+    const target = this.db.prepare('SELECT id,fingerprint FROM articles WHERE id=?').get(id);
+    if (!target) return 0;
+    const stamp = read ? new Date().toISOString() : null;
+    this.db.exec('BEGIN');
+    try {
+      this.db.prepare('INSERT INTO story_state(fingerprint,read,read_at) VALUES(?,?,?) ON CONFLICT(fingerprint) DO UPDATE SET read=excluded.read,read_at=excluded.read_at').run(target.fingerprint, Number(read), stamp);
+      const updated = this.db.prepare('UPDATE articles SET read=?,read_at=?,read_inherited=CASE WHEN ?=1 AND id<>? THEN 1 ELSE 0 END WHERE fingerprint=?').run(Number(read), stamp, Number(read), id, target.fingerprint).changes;
+      if (read) this.db.prepare('UPDATE articles SET seen=1,seen_at=COALESCE(seen_at,?) WHERE id=?').run(stamp, id);
+      this.db.exec('COMMIT');
+      return updated;
+    } catch (error) { this.db.exec('ROLLBACK'); throw error; }
+  }
+  setArticlePriority(id, priority) {
+    if (!Number.isInteger(priority) || priority < 0 || priority > 3) throw new Error('اولویت باید عددی بین صفر و سه باشد.');
+    return this.db.prepare('UPDATE articles SET priority=? WHERE id=?').run(priority, id).changes;
+  }
+  _where(filters = {}) {
+    const clauses = [], parameters = [];
+    if (filters.savedOnly || filters.saved === true) clauses.push('a.saved=1');
+    if (typeof filters.read === 'boolean') { clauses.push('a.read=?'); parameters.push(Number(filters.read)); }
+    if (filters.dateFrom) { clauses.push('a.date_known=1 AND a.published_at>=?'); parameters.push(String(filters.dateFrom).length === 10 ? `${filters.dateFrom}T00:00:00.000Z` : String(filters.dateFrom)); }
+    if (filters.dateTo) { clauses.push('a.date_known=1 AND a.published_at<=?'); parameters.push(String(filters.dateTo).length === 10 ? `${filters.dateTo}T23:59:59.999Z` : String(filters.dateTo)); }
+    if (filters.country) { clauses.push("EXISTS(SELECT 1 FROM json_each(a.payload,'$.locations') l WHERE json_extract(l.value,'$.countryCode')=?)"); parameters.push(String(filters.country).toUpperCase()); }
+    if (filters.city) { clauses.push("EXISTS(SELECT 1 FROM json_each(a.payload,'$.locations') l WHERE lower(json_extract(l.value,'$.city'))=lower(?))"); parameters.push(String(filters.city)); }
+    if (filters.sourceId) { clauses.push("json_extract(a.payload,'$.sourceId')=?"); parameters.push(String(filters.sourceId)); }
+    if (filters.platform) { clauses.push("json_extract(a.payload,'$.platform')=?"); parameters.push(String(filters.platform)); }
+    if (filters.query) {
+      clauses.push("(json_extract(a.payload,'$.title') LIKE ? ESCAPE '\\' OR json_extract(a.payload,'$.summary') LIKE ? ESCAPE '\\' OR json_extract(a.payload,'$.sourceName') LIKE ? ESCAPE '\\')");
+      const term = `%${String(filters.query).replace(/[\\%_]/g, value => `\\${value}`)}%`;
+      parameters.push(term, term, term);
+    }
+    return { sql: clauses.length ? ` WHERE ${clauses.join(' AND ')}` : '', parameters };
+  }
+  articles(filters = {}) {
+    const where = this._where(filters);
+    let query = `${selectArticles}${where.sql} ORDER BY a.published_at DESC,a.id`;
+    if (filters.limit !== undefined) { query += ' LIMIT ? OFFSET ?'; where.parameters.push(boundedNumber(filters.limit, 100, 10000), boundedNumber(filters.offset, 0, Number.MAX_SAFE_INTEGER)); }
+    return this.db.prepare(query).all(...where.parameters).map(parsePayload);
+  }
+  savedArticles() { return this.articles({ savedOnly: true }); }
+  searchArchive(filters = {}) {
+    const limit = boundedNumber(filters.limit, 100, 1000), offset = boundedNumber(filters.offset, 0, Number.MAX_SAFE_INTEGER);
+    const where = this._where(filters);
+    return { articles: this.articles({ ...filters, limit, offset }), total: Number(this.db.prepare(`SELECT COUNT(*) AS total FROM articles a${where.sql}`).get(...where.parameters).total), limit, offset, coverage: this.archiveCoverage() };
+  }
+  archiveCoverage() {
+    const row = this.db.prepare('SELECT COUNT(*) AS total,MIN(CASE WHEN date_known=1 THEN published_at END) AS oldest,MAX(CASE WHEN date_known=1 THEN published_at END) AS newest,SUM(CASE WHEN date_known=0 THEN 1 ELSE 0 END) AS unknown FROM articles').get();
+    return { articleCount: Number(row.total), oldestPublishedAt: row.oldest || null, newestPublishedAt: row.newest || null, unknownDateCount: Number(row.unknown || 0), startedCollectingAt: this.getSetting('archiveStartedAt'), scope: 'local' };
+  }
+  encrypt(value) { const iv = randomBytes(12); const cipher = createCipheriv('aes-256-gcm', this.key, iv); const ciphertext = Buffer.concat([cipher.update(json(value)), cipher.final()]); return [iv, cipher.getAuthTag(), ciphertext].map(part => part.toString('base64')).join('.'); }
   decrypt(value) { const [iv, tag, ciphertext] = value.split('.').map(part => Buffer.from(part, 'base64')); const decipher = createDecipheriv('aes-256-gcm', this.key, iv); decipher.setAuthTag(tag); return JSON.parse(Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString('utf8')); }
   setConnection(platform, label, secret) { this.db.prepare('INSERT INTO connections(platform,label,secret) VALUES(?,?,?) ON CONFLICT(platform) DO UPDATE SET label=excluded.label,secret=excluded.secret').run(platform, label, this.encrypt(secret)); }
   getConnection(platform) { const row = this.db.prepare('SELECT * FROM connections WHERE platform=?').get(platform); return row ? { platform, label: row.label, ...this.decrypt(row.secret) } : null; }
   deleteConnection(platform) { return this.db.prepare('DELETE FROM connections WHERE platform=?').run(platform).changes; }
-  connections() { const rows = this.db.prepare('SELECT platform,label FROM connections').all(); return Object.entries(CAPABILITIES).map(([platform, capability]) => { const row = rows.find(item => item.platform === platform); return { platform, connected: Boolean(row), label: row?.label || null, capability }; }); }
-  dashboard() { return { articles: this.articles(), sources: this.sources(), connections: this.connections(), keywords: this.getSetting('keywords', []), lastSyncAt: this.getSetting('lastSyncAt'), syncErrors: this.getSetting('syncErrors', []) }; }
+  connections() {
+    const rows = this.db.prepare('SELECT platform,label FROM connections').all();
+    const custom = this.getSetting('customPlatforms', []);
+    const metadata = { ...CAPABILITIES };
+    if (Array.isArray(custom)) for (const item of custom) if (item && typeof item.platform === 'string') metadata[item.platform] = item.capability || 'اتصال سفارشی با دسترسی مجاز API';
+    return Object.entries(metadata).map(([platform, capability]) => { const row = rows.find(item => item.platform === platform); return { platform, connected: Boolean(row), label: row?.label || null, capability }; });
+  }
+  dashboard() {
+    const recent = this.articles({ limit: 1000 });
+    const all = [...new Map([...recent, ...this.savedArticles()].map(article => [article.id, article])).values()].sort((a, b) => b.publishedAt.localeCompare(a.publishedAt));
+    const coverage = this.archiveCoverage();
+    return { articles: all, sources: this.sources(), connections: this.connections(), keywords: this.getSetting('keywords', []), lastSyncAt: this.getSetting('lastSyncAt'), syncErrors: this.getSetting('syncErrors', []), articleCount: coverage.articleCount, archiveCoverage: coverage };
+  }
 }

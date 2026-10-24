@@ -7,7 +7,7 @@ test('Persian dashboard loads real empty storage without fabricated articles', a
   await expect(page.locator('html')).toHaveAttribute('dir', 'rtl');
   await expect(page.getByRole('heading', { level: 1 })).toContainText('اتاق خبر شما');
   await expect(page.getByRole('heading', { name: 'اولین خبر، یک کلیک فاصله دارد' })).toBeVisible();
-  await expect(page.locator('.source-mini')).toHaveCount(4);
+  await expect(page.locator('.source-mini')).toHaveCount(5);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   expect(errors).toEqual([]);
   await page.screenshot({ path: test.info().outputPath('dashboard-desktop.png'), fullPage: true });
@@ -78,6 +78,7 @@ test('article filtering, bookmark and sync error rendering work with isolated te
     syncErrors: [] as { sourceId: string; sourceName: string; message: string }[],
   };
   await page.route('**/api/dashboard', route => route.fulfill({ json: payload }));
+  await page.route('**/api/saved', route => route.fulfill({ json: { articles: payload.articles.filter(article => article.saved) } }));
   await page.route('**/api/articles/test-fa/save', async route => {
     payload.articles[0].saved = route.request().postDataJSON().saved;
     await route.fulfill({ json: { ok: true } });
