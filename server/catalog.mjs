@@ -13,7 +13,7 @@ const officialWebsite = (id, name, url, countryCode, description) => ({
 });
 
 export const SOURCE_CATALOG = Object.freeze([
-  {...news('iran-international','ایران اینترنشنال','https://www.iranintl.com/','GB','وب‌سایت ایران اینترنشنال؛ دریافت خودکار تنها با فید عمومی معتبر و در دسترس ممکن است. فید این منبع در محیط ساخت تأیید نشده است.'),collection:'website',platform:'website',availability:'reference-only'},
+  {...news('iran-international','ایران اینترنشنال','https://www.iranintl.com/','GB','دریافت از فید یا دادهٔ خبری عمومی سایت، پس از بررسی دسترسی روی دستگاه شما؛ دسترسی زنده در محیط ساخت تأیید نشده است.'),collection:'structured',platform:'website'},
   news('isna', 'ایسنا', 'https://www.isna.ir/rss', 'IR', 'خبرگزاری دانشجویان ایران؛ خوراک عمومی خبرها.'),
   news('irna', 'ایرنا', 'https://www.irna.ir/rss', 'IR', 'خبرگزاری جمهوری اسلامی ایران؛ خبرها و گزارش‌های منتشرشده در خوراک عمومی.'),
   news('mehr', 'مهر', 'https://www.mehrnews.com/rss', 'IR', 'خبرگزاری مهر؛ فید عمومی خبرهای ایران و جهان.'),

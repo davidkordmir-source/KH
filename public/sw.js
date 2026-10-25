@@ -1,5 +1,5 @@
 // Cache application files only. Authenticated APIs, media proxies and exports are never cached.
-const CACHE='dideban-shell-0.4.0';
+const CACHE='dideban-shell-0.4.2';
 self.addEventListener('install',event=>{event.waitUntil(caches.open(CACHE).then(cache=>cache.addAll(['/','/manifest.webmanifest','/dideban-icon.svg'])));});
 self.addEventListener('activate',event=>{event.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(key=>key.startsWith('dideban-shell-')&&key!==CACHE).map(key=>caches.delete(key)))));});
 self.addEventListener('fetch',event=>{

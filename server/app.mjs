@@ -3,6 +3,7 @@ import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { safeFetch, validatePublicUrl } from './network.mjs';
 import { parseFeed, cleanText, categoryFor, discoverFeedUrl } from './feeds.mjs';
+import { collectWebsite } from './websites.mjs';
 import { Store, CAPABILITIES } from './store.mjs';
 import { validatePlatformConnection, collectPlatformArticles } from './platforms.mjs';
 import { createMarketsService } from './markets.mjs';
@@ -99,18 +100,25 @@ export function createApp({ directory = path.resolve('.data'), distDirectory = p
     return metadata;
   }
 
-  async function checkedFeed(rawUrl, name) {
+  async function checkedSource(rawUrl, name, mode = 'auto') {
     const { url } = await urlValidator(rawUrl);
+    if (mode === 'link') return {url:url.href,platform:'website-link',articles:[]};
     let feedUrl = url.href;
     let contents = await fetcher(feedUrl);
     if (/<!doctype\s+html|<html[\s>]/i.test(contents)) {
       const discovered = discoverFeedUrl(contents, feedUrl);
-      if (!discovered) throw new Error('در این سایت فید عمومی RSS یا Atom پیدا نشد.');
+      if (!discovered) {
+        const result = await collectWebsite({id:'validation',name,url:feedUrl}, {fetcher,urlValidator}, contents);
+        return {url:feedUrl,platform:'website',articles:result.articles};
+      }
       feedUrl = (await urlValidator(discovered)).url.href;
       contents = await fetcher(feedUrl);
     }
-    parseFeed(contents, { id: 'validation', name });
-    return feedUrl;
+    return {url:feedUrl,platform:'rss',articles:parseFeed(contents,{id:'validation',name,url:feedUrl})};
+  }
+  function saveInitialArticles(source, articles) {
+    store.addArticles(articles.map(article=>({...article,sourceId:source.id,sourceName:source.name,platform:source.platform,sourceKind:source.kind,sourcePriority:source.priority||0})));
+    if (source.platform !== 'website-link') store.markSource(source.id);
   }
 
   function normalizeCollected(items, platform) {
@@ -175,11 +183,11 @@ export function createApp({ directory = path.resolve('.data'), distDirectory = p
     if (pendingSync) return pendingSync;
     pendingSync = (async () => {
       const errors = [];
-      const sources = store.sources().filter(source => source.enabled);
+      const sources = store.sources().filter(source => source.enabled && source.platform !== 'website-link');
       await Promise.all(sources.map(async source => {
         try {
-          const xml = await fetcher(source.url);
-          store.addArticles(parseFeed(xml, source).map(article => ({ ...article, sourceKind: source.kind, sourceIconUrl: article.sourceIconUrl || source.iconUrl, sourcePriority: source.priority || 0 })));
+          const items = source.platform === 'website' ? (await collectWebsite(source,{fetcher,urlValidator})).articles : parseFeed(await fetcher(source.url),source);
+          store.addArticles(items.map(article => ({ ...article, sourceKind: source.kind, sourceIconUrl: article.sourceIconUrl || source.iconUrl, sourcePriority: source.priority || 0 })));
           store.markSource(source.id);
         } catch (error) {
           const message = publicError(error);
@@ -245,14 +253,17 @@ export function createApp({ directory = path.resolve('.data'), distDirectory = p
     const entry = SOURCE_CATALOG.find(item => item.id === req.params.id);
     if (!entry) return res.status(404).json({ error: 'منبع در فهرست وجود ندارد.' });
     if (entry.collection === 'website') return res.status(422).json({ error: 'این مورد پیوند وب‌سایت رسمی است و اتصال خودکار فید برای آن فعال نیست. از «مشاهدهٔ سایت رسمی» استفاده کنید.' });
-    const feedUrl = await checkedFeed(entry.url, entry.name);
+    const checked = await checkedSource(entry.url, entry.name);
+    const feedUrl = checked.url;
     const existing = store.sources().find(item => item.url === feedUrl || item.url === entry.url);
     if (existing) {
       store.updateSource(existing.id, { enabled: true, kind: entry.kind, iconUrl: entry.iconUrl, countryCode: entry.countryCode });
       return res.json({ source: store.sources().find(item => item.id === existing.id), alreadyExists: true });
     }
     if (store.sources().length >= 100) return res.status(400).json({ error: 'حداکثر صد منبع قابل ثبت است.' });
-    res.status(201).json({ source: store.addSource({ ...entry, url: feedUrl }) });
+    const source=store.addSource({...entry,url:feedUrl,platform:checked.platform});
+    saveInitialArticles(source,checked.articles);
+    res.status(201).json({source});
   }));
   app.get('/api/connectors', (_req, res) => res.json({ connectors: Object.entries(customCapabilities).map(([type, value]) => typeof value === 'string' ? { type, name: type, description: value } : { type, ...value }) }));
   app.post('/api/custom-connections', route(async (req, res) => {
@@ -282,13 +293,16 @@ export function createApp({ directory = path.resolve('.data'), distDirectory = p
   }));
   app.post('/api/sync', route(async (_req, res) => res.json(await sync())));
   app.post('/api/sources', route(async (req, res) => {
-    const { name, url } = req.body || {};
-    if (typeof name !== 'string' || !name.trim() || name.length > 100 || typeof url !== 'string' || url.length > 2048) return res.status(400).json({ error: 'نام و نشانی RSS معتبر را وارد کنید.' });
+    const { name, url, mode = 'auto' } = req.body || {};
+    if (!['auto','link'].includes(mode)) return res.status(400).json({error:'روش افزودن منبع معتبر نیست.'});
+    if (typeof name !== 'string' || !name.trim() || name.length > 100 || typeof url !== 'string' || url.length > 2048) return res.status(400).json({ error: 'نام و نشانی سایت یا RSS معتبر را وارد کنید.' });
     const metadata = sourceMetadata(req.body);
     if (store.sources().length >= 100) return res.status(400).json({ error: 'حداکثر صد منبع قابل ثبت است.' });
-    const feedUrl = await checkedFeed(url, name.trim());
+    const checked = await checkedSource(url, name.trim(), mode);
+    const feedUrl = checked.url;
     if (store.sources().some(source => source.url === feedUrl)) return res.status(409).json({ error: 'این منبع قبلاً اضافه شده است.' });
-    const source = store.addSource({ name: name.trim(), url: feedUrl, ...metadata, iconUrl: `${new URL(feedUrl).origin}/favicon.ico` });
+    const source = store.addSource({ name: name.trim(), url: feedUrl, ...metadata, platform:checked.platform, enabled:mode !== 'link', iconUrl: `${new URL(feedUrl).origin}/favicon.ico` });
+    saveInitialArticles(source,checked.articles);
     res.status(201).json(source);
   }));
   app.patch('/api/sources/:id', route(async (req, res) => {

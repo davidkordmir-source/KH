@@ -1,3 +1,4 @@
+import PersianTranslation from './PersianTranslation';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import L from 'leaflet';
 import { AlertCircle, ArrowUpLeft, Bookmark, CheckCheck, Globe2, LocateFixed, MapPin, X } from 'lucide-react';
@@ -9,7 +10,7 @@ type Mention = { countryCode: string; countryName: string; city?: string; lat: n
 type AtlasArticle = {
   id: string; title: string; summary: string; url: string; sourceName: string; publishedAt: string;
   publishedAtKnown?: boolean; sourceIconUrl?: string | null; saved: boolean; read?: boolean;
-  locations?: Mention[];
+  language?: string; translatedTitle?: string; translatedSummary?: string; translationProvider?: string; locations?: Mention[];
 };
 type Country = { code: string; name: string };
 type FeatureCollection = Parameters<typeof L.geoJSON>[0];
@@ -85,7 +86,7 @@ export default function AtlasPanel({ articles }: { articles: AtlasArticle[] }) {
     const controller = new AbortController();
     let disposed = false;
     let failures = 0;
-    const instance = L.map(element.current, { center: [28, 40], zoom: 2, minZoom: 2, maxZoom: 12, scrollWheelZoom: false, worldCopyJump: true });
+    const instance = L.map(element.current, { center: [28, 40], zoom: 2, minZoom: 2, maxZoom: 12, scrollWheelZoom: true, worldCopyJump: true });
     map.current = instance;
     L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 19,
@@ -144,12 +145,15 @@ export default function AtlasPanel({ articles }: { articles: AtlasArticle[] }) {
       const maximum=Math.max(1,...counts.values()),density=(counts.get(code)||0)/maximum;
       return { color: selected ? '#dc7859' : '#768e95', weight: selected ? 2.4 : 1, fillColor: selected ? '#e68362' : counts.has(code) ? '#237e6e' : '#d7e4e7', fillOpacity: selected ? 0.55 : counts.has(code) ? 0.18+0.58*Math.sqrt(density) : 0.08 };
     });
+  }, [country, counts, mapReady]);
+
+  useEffect(() => {
     const layer = countryLayers.current.get(country);
     if (layer && 'getBounds' in layer && typeof layer.getBounds === 'function') {
       const bounds = layer.getBounds() as L.LatLngBounds;
       if (bounds.isValid()) map.current?.fitBounds(bounds, { padding: [25, 25], maxZoom: 6, animate: false });
     } else if (!country && mapReady) map.current?.setView([28, 40], 2, { animate: false });
-  }, [country, counts, mapReady]);
+  }, [country, mapReady]);
 
   useEffect(() => {
     const group = citiesLayer.current;
@@ -214,7 +218,7 @@ export default function AtlasPanel({ articles }: { articles: AtlasArticle[] }) {
       const flags = { saved: article.saved, read: article.read, ...overrides[article.id] };
       return <article key={article.id} className={`atlas-news-card ${flags.read ? 'atlas-read' : ''}`}>
         <div className="atlas-news-meta"><span>{article.sourceName}</span><span>{(article.locations || []).filter(location => (!country || country === location.countryCode) && (!city || city === location.city)).map(location => location.city || location.countryName).filter((name, index, list) => list.indexOf(name) === index).join('، ')}</span></div>
-        <a href={article.url} target="_blank" rel="noreferrer" onClick={() => { if (!flags.read) void action(article, 'read', true); }}><h4 dir="auto">{article.title}</h4></a><p dir="auto">{article.summary}</p>
+        <a href={article.url} target="_blank" rel="noreferrer" onClick={() => { if (!flags.read) void action(article, 'read', true); }}><h4 dir="auto">{article.title}</h4></a><p dir="auto">{article.summary}</p><PersianTranslation article={article}/>
         <div className="atlas-news-footer"><a href={article.url} target="_blank" rel="noreferrer" onClick={() => { if (!flags.read) void action(article, 'read', true); }}>منبع اصلی<ArrowUpLeft size={14} /></a><div><button aria-label={flags.read ? 'علامت‌گذاری به‌عنوان نخوانده' : 'علامت‌گذاری به‌عنوان خوانده‌شده'} disabled={busy === `${article.id}:read`} onClick={() => void action(article, 'read', !flags.read)} className={flags.read ? 'active' : ''}><CheckCheck size={17} />{flags.read ? 'خوانده‌شده' : 'نخوانده'}</button><button aria-label={flags.saved ? 'برداشتن خبر نقشه از ذخیره‌شده‌ها' : 'ذخیرهٔ خبر نقشه'} disabled={busy === `${article.id}:saved`} onClick={() => void action(article, 'saved', !flags.saved)} className={flags.saved ? 'active' : ''}><Bookmark size={17} fill={flags.saved ? 'currentColor' : 'none'} /></button></div></div>
       </article>;
     })}</div> : <div className="atlas-empty"><MapPin size={28} /><h3>خبری با این مکان پیدا نشد.</h3><p>انتخاب روی نقشه فقط خبرهایی را نمایش می‌دهد که نام این کشور یا شهر در متنشان تشخیص داده شده است.</p></div>}

@@ -1,3 +1,4 @@
+import PersianTranslation from './PersianTranslation';
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import * as jalaali from 'jalaali-js';
 import { AlertCircle, Archive, ArrowLeft, ArrowRight, ArrowUpLeft, Bookmark, CalendarDays, CheckCheck, ChevronDown, Download, KeyRound, LoaderCircle, Search, ShieldCheck } from 'lucide-react';
@@ -11,7 +12,7 @@ type Coverage = {
 type ArchiveArticle = {
   id: string; title: string; summary: string; summaryAuto?: string; summaryMethod?: string; url: string;
   sourceName: string; sourceIconUrl?: string | null; imageUrl?: string | null; publishedAt: string;
-  publishedAtKnown?: boolean; saved: boolean; read?: boolean; duplicateCount?: number;
+  language?: string; translatedTitle?: string; translatedSummary?: string; translationProvider?: string; publishedAtKnown?: boolean; saved: boolean; read?: boolean; duplicateCount?: number;
   media?: { type: string; url: string; mimeType?: string; poster?: string }[];
 };
 type Result = { articles: ArchiveArticle[]; total: number; limit: number; offset: number; coverage?: Coverage };
@@ -170,7 +171,7 @@ export default function ArchivePanel() {
       const video = article.media?.find(media => media.type === 'video');
       return <article className={`archive-news-card ${article.read ? 'archive-read' : ''}`} key={article.id}>
         <div className="archive-news-body"><div className="archive-news-meta"><span>{article.sourceIconUrl && <img src={article.sourceIconUrl} alt="" referrerPolicy="no-referrer" loading="lazy" onError={event => { event.currentTarget.style.display = 'none'; }} />}{article.sourceName}</span><time dateTime={article.publishedAtKnown === false ? undefined : article.publishedAt}>{article.publishedAtKnown === false ? 'زمان انتشار نامشخص' : persianDate(article.publishedAt)}</time>{article.read && <span className="archive-read-label"><CheckCheck size={13} />خوانده‌شده</span>}</div>
-          <a href={article.url} target="_blank" rel="noreferrer" onClick={() => { if (!article.read) void changeArticle(article, 'read', true); }}><h4 dir="auto">{article.title}</h4></a><p dir="auto">{article.summaryAuto || article.summary}</p>{article.summaryAuto && <small className="archive-summary-label">خلاصهٔ استخراجی از متن موجود؛ بدون تحلیل هوش مصنوعی</small>}
+          <a href={article.url} target="_blank" rel="noreferrer" onClick={() => { if (!article.read) void changeArticle(article, 'read', true); }}><h4 dir="auto">{article.title}</h4></a><p dir="auto">{article.summaryAuto || article.summary}</p><PersianTranslation article={article}/>{article.summaryAuto && <small className="archive-summary-label">خلاصهٔ استخراجی از متن موجود؛ بدون تحلیل هوش مصنوعی</small>}
           {(article.duplicateCount || 0) > 0 && <span className="archive-similar">عنوان مشابه در {number(article.duplicateCount! + 1)} خبر</span>}
           <div className="archive-news-actions"><a href={article.url} target="_blank" rel="noreferrer" onClick={() => { if (!article.read) void changeArticle(article, 'read', true); }}>خواندن منبع اصلی<ArrowUpLeft size={14} /></a><div><button className={article.read ? 'active' : ''} disabled={busy === `${article.id}:read`} onClick={() => void changeArticle(article, 'read', !article.read)} aria-label={article.read ? 'علامت‌گذاری خبر آرشیو به‌عنوان نخوانده' : 'علامت‌گذاری خبر آرشیو به‌عنوان خوانده'}><CheckCheck size={16} />{article.read ? 'خوانده‌شده' : 'نخوانده'}</button><button className={article.saved ? 'active' : ''} disabled={busy === `${article.id}:saved`} onClick={() => void changeArticle(article, 'saved', !article.saved)} aria-pressed={article.saved} aria-label={article.saved ? 'برداشتن خبر آرشیو از ذخیره‌شده‌ها' : 'ذخیرهٔ خبر آرشیو'}><Bookmark size={18} fill={article.saved ? 'currentColor' : 'none'} /></button></div></div>
         </div>

@@ -1,3 +1,4 @@
+import PersianTranslation from './PersianTranslation';
 import { useState } from 'react';
 import { Bell, BookOpen, Database, Download, ExternalLink, FileSearch, FolderOpen, Images, Layers3, Printer, Search, Settings2, ShieldCheck, Users, X } from 'lucide-react';
 import type { Article } from './App';
@@ -12,7 +13,7 @@ type Tab='search'|'events'|'alerts'|'risk'|'profiles'|'media'|'sources'|'backup'
 type Source={id:string;name:string};
 export type StoryEvent={id:string;title:string;firstAt:string;lastAt:string;sourceCount:number;count:number;articles:Article[]};
 export function ArticleRows({articles,onSelect,media=false}:{articles:Article[];onSelect:(id:string)=>void;media?:boolean}) {
-  return <div className={media?'wb-media-grid':'wb-results'}>{articles.map(article=><article className="wb-card wb-article" key={article.id}><div className="wb-meta"><span>{article.sourceName}</span><time>{article.publishedAtKnown===false?'زمان انتشار نامشخص':dateTime(article.publishedAt)}</time><span>{article.language}</span></div><button className="wb-title" dir="auto" onClick={()=>onSelect(article.id)}>{article.title}</button><p dir="auto">{article.summaryAuto||article.summary}</p>
+  return <div className={media?'wb-media-grid':'wb-results'}>{articles.map(article=><article className="wb-card wb-article" key={article.id}><div className="wb-meta"><span>{article.sourceName}</span><time>{article.publishedAtKnown===false?'زمان انتشار نامشخص':dateTime(article.publishedAt)}</time><span>{article.language}</span></div><button className="wb-title" dir="auto" onClick={()=>onSelect(article.id)}>{article.title}</button><p dir="auto">{article.summaryAuto||article.summary}</p><PersianTranslation article={article}/>
     {media&&<div className="wb-media-items">{(article.media||[]).slice(0,6).map((item,index)=><figure key={index}>{item.type==='video'?<video controls preload="none" poster={item.poster} src={item.url}/>:<img src={item.url} alt={`رسانهٔ منتشرشده همراه ${article.title}`} loading="lazy" referrerPolicy="no-referrer"/>}<figcaption><a href={item.url} target="_blank" rel="noreferrer">رسانهٔ اصلی <ExternalLink size={12}/></a></figcaption></figure>)}</div>}
     <div className="wb-actions"><button className="secondary-button" onClick={()=>onSelect(article.id)}><BookOpen size={14}/>متن، ترجمه و یادداشت</button><a className="wb-link" href={article.url} target="_blank" rel="noreferrer">اصل خبر <ExternalLink size={13}/></a>{article.saved&&<span className="wb-tag">ذخیره‌شده</span>}</div>
   </article>)}</div>;
