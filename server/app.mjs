@@ -3,6 +3,7 @@ import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { safeFetch, validatePublicUrl } from './network.mjs';
 import { parseFeed, cleanText, categoryFor, discoverFeedUrl } from './feeds.mjs';
+import { publicSourceSpec, collectPublicSource } from './public-social.mjs';
 import { collectWebsite } from './websites.mjs';
 import { Store, CAPABILITIES } from './store.mjs';
 import { validatePlatformConnection, collectPlatformArticles } from './platforms.mjs';
@@ -103,6 +104,7 @@ export function createApp({ directory = path.resolve('.data'), distDirectory = p
   async function checkedSource(rawUrl, name, mode = 'auto') {
     const { url } = await urlValidator(rawUrl);
     if (mode === 'link') return {url:url.href,platform:'website-link',articles:[]};
+    if(url.hostname==='t.me') {const spec=await publicSourceSpec('telegram',url.href,fetcher);return {...spec,articles:await collectPublicSource({...spec,id:'validation',name},fetcher)};}
     let feedUrl = url.href;
     let contents = await fetcher(feedUrl);
     if (/<!doctype\s+html|<html[\s>]/i.test(contents)) {
@@ -117,7 +119,7 @@ export function createApp({ directory = path.resolve('.data'), distDirectory = p
     return {url:feedUrl,platform:'rss',articles:parseFeed(contents,{id:'validation',name,url:feedUrl})};
   }
   function saveInitialArticles(source, articles) {
-    store.addArticles(articles.map(article=>({...article,sourceId:source.id,sourceName:source.name,platform:source.platform,sourceKind:source.kind,sourcePriority:source.priority||0})));
+    store.addArticles(articles.map(article=>({...article,sourceId:source.id,sourceName:source.name,platform:source.platform.replace(/-public$/,''),sourceKind:source.kind,sourcePriority:source.priority||0})));
     if (source.platform !== 'website-link') store.markSource(source.id);
   }
 
@@ -186,7 +188,7 @@ export function createApp({ directory = path.resolve('.data'), distDirectory = p
       const sources = store.sources().filter(source => source.enabled && source.platform !== 'website-link');
       await Promise.all(sources.map(async source => {
         try {
-          const items = source.platform === 'website' ? (await collectWebsite(source,{fetcher,urlValidator})).articles : parseFeed(await fetcher(source.url),source);
+          const items = ['telegram-public','youtube-public','mastodon-public'].includes(source.platform) ? await collectPublicSource(source,fetcher) : source.platform === 'website' ? (await collectWebsite(source,{fetcher,urlValidator})).articles : parseFeed(await fetcher(source.url),source);
           store.addArticles(items.map(article => ({ ...article, sourceKind: source.kind, sourceIconUrl: article.sourceIconUrl || source.iconUrl, sourcePriority: source.priority || 0 })));
           store.markSource(source.id);
         } catch (error) {
@@ -292,6 +294,20 @@ export function createApp({ directory = path.resolve('.data'), distDirectory = p
     res.type(media.contentType).send(media.data);
   }));
   app.post('/api/sync', route(async (_req, res) => res.json(await sync())));
+  app.post('/api/public-connections',route(async(req,res)=>{
+    const {type,input,label}=req.body||{};
+    if(typeof label!=='undefined'&&(typeof label!=='string'||label.length>100))return res.status(400).json({error:'نام منبع معتبر نیست.'});
+    if(store.sources().length>=100)return res.status(400).json({error:'حداکثر صد منبع قابل ثبت است.'});
+    const spec=await publicSourceSpec(type,input,fetcher);
+    await urlValidator(spec.url);
+    if(store.sources().some(source=>source.url===spec.url))return res.status(409).json({error:'این منبع عمومی قبلاً اضافه شده است.'});
+    const validated={...spec,id:'validation',name:label?.trim()||spec.name};
+    const articles=await collectPublicSource(validated,fetcher);
+    if(!articles.length)return res.status(422).json({error:'این منبع هنوز پست عمومی قابل دریافت ندارد؛ اتصال ثبت نشد.'});
+    const source=store.addSource({...spec,name:validated.name,kind:'social',iconUrl:articles[0].sourceIconUrl||new URL('/favicon.ico',spec.url).href});
+    saveInitialArticles(source,articles);
+    res.status(201).json({source,imported:articles.length,scope:'public-only'});
+  }));
   app.post('/api/sources', route(async (req, res) => {
     const { name, url, mode = 'auto' } = req.body || {};
     if (!['auto','link'].includes(mode)) return res.status(400).json({error:'روش افزودن منبع معتبر نیست.'});

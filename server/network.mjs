@@ -15,7 +15,7 @@ const TRUSTED_PROXY_HOSTS = new Set([
   'rss.dw.com', 'www.dawn.com', 'www.cbc.ca', 'www.abc.net.au',
   'www.thehindu.com', 'www.whitehouse.gov', 'www.gov.uk',
   'en.kremlin.ru', 'news.un.org', 'public.api.bsky.app',
-  'mastodon.social', 'tapi.bale.ai',
+  'mastodon.social', 'tapi.bale.ai', 't.me', 'www.youtube.com',
   'raw.githubusercontent.com',
   'api.gold-api.com', 'data-asg.goldprice.org',
   'api.cognitive.microsofttranslator.com',
