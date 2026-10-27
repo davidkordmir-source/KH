@@ -105,6 +105,8 @@ export function createApp({ directory = path.resolve('.data'), distDirectory = p
     const { url } = await urlValidator(rawUrl);
     if (mode === 'link') return {url:url.href,platform:'website-link',articles:[]};
     if(url.hostname==='t.me') {const spec=await publicSourceSpec('telegram',url.href,fetcher);return {...spec,articles:await collectPublicSource({...spec,id:'validation',name},fetcher)};}
+    const socialType=['instagram.com','www.instagram.com'].includes(url.hostname)?'instagram':['x.com','www.x.com','twitter.com','www.twitter.com'].includes(url.hostname)?'x':null;
+    if(socialType){const spec=await publicSourceSpec(socialType,url.href,fetcher);return {...spec,articles:await collectPublicSource({...spec,id:'validation',name},fetcher)};}
     let feedUrl = url.href;
     let contents = await fetcher(feedUrl);
     if (/<!doctype\s+html|<html[\s>]/i.test(contents)) {
@@ -188,7 +190,7 @@ export function createApp({ directory = path.resolve('.data'), distDirectory = p
       const sources = store.sources().filter(source => source.enabled && source.platform !== 'website-link');
       await Promise.all(sources.map(async source => {
         try {
-          const items = ['telegram-public','youtube-public','mastodon-public'].includes(source.platform) ? await collectPublicSource(source,fetcher) : source.platform === 'website' ? (await collectWebsite(source,{fetcher,urlValidator})).articles : parseFeed(await fetcher(source.url),source);
+          const items = ['telegram-public','youtube-public','mastodon-public','instagram-public','x-public'].includes(source.platform) ? await collectPublicSource(source,fetcher) : source.platform === 'website' ? (await collectWebsite(source,{fetcher,urlValidator})).articles : parseFeed(await fetcher(source.url),source);
           store.addArticles(items.map(article => ({ ...article, sourceKind: source.kind, sourceIconUrl: article.sourceIconUrl || source.iconUrl, sourcePriority: source.priority || 0 })));
           store.markSource(source.id);
         } catch (error) {

@@ -1,3 +1,4 @@
+import {translateWithGoogleWeb} from './google-web-translation.mjs';
 import { createHash, randomUUID } from 'node:crypto';
 import { normalizeStoryTitle } from './enrichment.mjs';
 import { safeMediaUrl } from './feeds.mjs';
@@ -140,10 +141,18 @@ export function createNewsroom({ store, markets, fetcher }) {
     const result={title:response[0].translations[0].text,body:response[1].translations[0].text,target,provider:'Microsoft Translator',translatedAt:new Date().toISOString(),inputScope:item.fullText?'publisher-feed':'feed-description',truncated:(item.fullText||item.summary||'').length>14000};
     store.db.prepare('INSERT OR REPLACE INTO translations VALUES(?,?)').run(key,JSON.stringify(result));return result;
   }
+  const googleCacheKey=(item,target)=>hash(`google-web|${item.id}|${item.title}|${(item.fullText||item.summary||'').slice(0,3000)}|${target}`);
+  async function translateGoogle(id,target='fa') {
+    const item=article(id),key=googleCacheKey(item,target);
+    const cached=store.db.prepare('SELECT payload FROM translations WHERE cache_key=?').get(key);
+    if(cached)return JSON.parse(cached.payload);
+    const result=await translateWithGoogleWeb(item,target,fetcher);
+    store.db.prepare('INSERT OR REPLACE INTO translations VALUES(?,?)').run(key,JSON.stringify(result));return result;
+  }
   function cachedTranslation(item,target='fa') {
     const original=store.article(item.id);if(!original)return null;
     const text=(original.fullText||original.summary||'').slice(0,14000),key=hash(`${original.id}|${original.title}|${text}|${target}`);
-    const cached=store.db.prepare('SELECT payload FROM translations WHERE cache_key=?').get(key);return cached?JSON.parse(cached.payload):null;
+    const cached=store.db.prepare('SELECT payload FROM translations WHERE cache_key=?').get(googleCacheKey(original,target))||store.db.prepare('SELECT payload FROM translations WHERE cache_key=?').get(key);return cached?JSON.parse(cached.payload):null;
   }
   function decorate(items){return items.map(item=>{const translated=item.language!=='fa'?cachedTranslation(item):null;return translated?{...item,translatedTitle:translated.title,translatedSummary:translated.body.slice(0,1000),translationProvider:translated.provider}:item;});}
   async function translateRecent(){
@@ -163,7 +172,7 @@ export function createNewsroom({ store, markets, fetcher }) {
     for(const query of queryTerms)for(const item of store.articles({query:`"${query}"`,dateFrom:since,limit:100}))map.set(item.id,item);
     return {articles:[...map.values()].sort((a,b)=>b.publishedAt.localeCompare(a.publishedAt)).slice(0,200),method:'keyword-matches',calendar:readJson('calendar_events').sort((a,b)=>a.time.localeCompare(b.time)),calendarFeeds:calendarService.feeds(),lastCheck:store.getSetting('lastAlertsCheck')};
   }
-  return {health,research,saveResearch,article,readJson,putRule,alerts,evaluate,translate,translateRecent,decorate,saveProfile,profileArticles,saveCalendar,risk,calendarService,isEvaluating:()=>Boolean(evaluating),
+  return {health,research,saveResearch,article,readJson,putRule,alerts,evaluate,translate,translateGoogle,translateRecent,decorate,saveProfile,profileArticles,saveCalendar,risk,calendarService,isEvaluating:()=>Boolean(evaluating),
     events:filters=>({events:groupEvents(store.articles({...filters,limit:1000}),store.sources()),scope:'حداکثر ۱۰۰۰ خبر مطابق فیلتر؛ گروه‌بندی احتمالی بر پایهٔ شباهت واژگان، در بازهٔ ۴۸ ساعت'}),
     versions:id=>store.db.prepare('SELECT title,body,captured_at AS capturedAt FROM article_versions WHERE article_id=? ORDER BY id DESC LIMIT 50').all(id),
     remove:(table,id)=>store.db.prepare(`DELETE FROM ${table} WHERE id=?`).run(id).changes,

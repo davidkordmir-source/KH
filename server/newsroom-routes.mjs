@@ -16,6 +16,7 @@ export function registerNewsroomRoutes({app,store,newsroom,backups,dateBound,fet
   app.get('/api/newsroom/articles/:id',route((req,res)=>{const article=newsroom.article(req.params.id);res.json({article,research:newsroom.research(req.params.id),versions:newsroom.versions(req.params.id),source:store.sources().find(s=>s.id===article.sourceId)||null});}));
   app.put('/api/newsroom/articles/:id/research',route((req,res)=>res.json({research:newsroom.saveResearch(req.params.id,req.body||{})})));
   app.post('/api/newsroom/articles/:id/translate',route(async(req,res)=>res.json(await newsroom.translate(req.params.id,req.body?.target||'fa'))));
+  app.post('/api/newsroom/articles/:id/translate-google',route(async(req,res)=>res.json(await newsroom.translateGoogle(req.params.id,req.body?.target||'fa'))));
   app.get('/api/newsroom/folders',(_req,res)=>res.json({folders:store.db.prepare("SELECT folder,COUNT(*) AS count FROM research_items WHERE folder<>'' GROUP BY folder ORDER BY folder").all()}));
   app.get('/api/newsroom/searches',(_req,res)=>res.json({searches:newsroom.readJson('saved_searches')}));
   app.post('/api/newsroom/searches',route((req,res)=>{

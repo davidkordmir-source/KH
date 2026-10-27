@@ -1,3 +1,4 @@
+import {profileSpec,collectPublicProfile} from './public-profile-pages.mjs';
 import {createHash} from 'node:crypto';
 import {load} from 'cheerio';
 import {categoryFor, cleanText, parseFeed, safeMediaUrl} from './feeds.mjs';
@@ -53,6 +54,7 @@ export function parseTelegramPublic(html,source,now=new Date()) {
 
 export async function publicSourceSpec(type,input,fetcher) {
   if(typeof input!=='string'||input.length>2048)throw problem('نشانی منبع عمومی معتبر نیست.');
+  if(['instagram','x'].includes(type))return profileSpec(type,input);
   if(type==='telegram') {const channel=telegramChannel(input);return {name:`تلگرام · ${channel}`,url:`https://t.me/s/${channel}`,platform:'telegram-public'};}
   if(type==='youtube') {
     let channel=input.trim(),page;
@@ -78,10 +80,11 @@ export async function publicSourceSpec(type,input,fetcher) {
     url.pathname=url.pathname.replace(/\.rss$/,'')+'.rss';
     return{name:'پروفایل عمومی Mastodon',url:url.href,platform:'mastodon-public'};
   }
-  throw problem('این شبکه اتصال بدون کلید ندارد. تلگرام عمومی، YouTube، Mastodon یا Bluesky را انتخاب کنید.');
+  throw problem('این شبکه اتصال بدون کلید ندارد. یکی از شبکه‌های فهرست دریافت عمومی را انتخاب کنید.');
 }
 
 export async function collectPublicSource(source,fetcher) {
+  if(['instagram-public','x-public'].includes(source.platform))return collectPublicProfile(source,fetcher);
   if(source.platform==='telegram-public')return parseTelegramPublic(await fetcher(source.url,{allowedHosts:['t.me'],maxBytes:3_000_000}),source);
   return parseFeed(await fetcher(source.url,source.platform==='youtube-public'?{allowedHosts:['www.youtube.com'],maxBytes:3_000_000}:{}),{...source,platform:source.platform.replace(/-public$/,'')});
 }

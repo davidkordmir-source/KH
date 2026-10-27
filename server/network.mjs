@@ -16,6 +16,7 @@ const TRUSTED_PROXY_HOSTS = new Set([
   'www.thehindu.com', 'www.whitehouse.gov', 'www.gov.uk',
   'en.kremlin.ru', 'news.un.org', 'public.api.bsky.app',
   'mastodon.social', 'tapi.bale.ai', 't.me', 'www.youtube.com',
+  'translate.google.com','www.instagram.com','instagram.com','x.com','www.x.com','twitter.com','www.twitter.com','syndication.twitter.com','platform.twitter.com',
   'raw.githubusercontent.com',
   'api.gold-api.com', 'data-asg.goldprice.org',
   'api.cognitive.microsofttranslator.com',

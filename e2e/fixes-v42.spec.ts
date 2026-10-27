@@ -4,7 +4,7 @@ const dashboard={articles:[article],sources:[],connections:[],keywords:[],syncEr
 test('foreign news has direct one-click Persian translation and retains original text',async({page})=>{
  await page.route('**/api/dashboard',route=>route.fulfill({json:dashboard}));
  await page.route('**/api/newsroom/articles/foreign/translate',route=>{expect(route.request().postDataJSON()).toEqual({target:'fa'});return route.fulfill({json:{title:'عنوان ترجمه‌شده',body:'متن فارسی خبر',provider:'Test translator'}});});
- await page.goto('/');await page.getByRole('button',{name:'ترجمه به فارسی',exact:true}).click();
+ await page.goto('/');await page.getByRole('button',{name:'Microsoft · با کلید',exact:true}).click();
  await expect(page.locator('.article-card')).toContainText('عنوان ترجمه‌شده');await expect(page.locator('.article-card')).toContainText(article.title);
 });
 test('mouse wheel zooms the map in and out',async({page})=>{
