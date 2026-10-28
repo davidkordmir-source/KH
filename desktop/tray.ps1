@@ -1,4 +1,4 @@
-$ErrorActionPreference = 'Stop'
+﻿$ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 $script:AppRoot = Split-Path -Parent $PSScriptRoot
@@ -6,7 +6,7 @@ $script:DataRoot = Join-Path $env:LOCALAPPDATA 'Dideban'
 [IO.Directory]::CreateDirectory($script:DataRoot) | Out-Null
 $created = $false
 $script:Mutex = New-Object Threading.Mutex($true, 'Local\DidebanNewsroomTray', [ref]$created)
-if (-not $created) { [Windows.Forms.MessageBox]::Show('Dideban is already running. Open it from the tray icon beside the clock.','Dideban') | Out-Null; $script:Mutex.Dispose(); exit }
+if (-not $created) { [Windows.Forms.MessageBox]::Show('Khabarnama is already running. Open it from the tray icon beside the clock.','Khabarnama') | Out-Null; $script:Mutex.Dispose(); exit }
 $script:OwnsMutex=$true
 $script:Node = $null; $script:Address = ''; $script:Updating = $false; $script:ReadyNotice = ''
 $random = New-Object byte[] 32
@@ -18,10 +18,10 @@ $env:DATA_DIR = Join-Path $script:DataRoot 'data'
 $env:HOST = '127.0.0.1'; $env:PORT = '0'
 $script:Stdout = Join-Path $script:DataRoot ('tray-' + $PID + '.log')
 $script:Stderr = Join-Path $script:DataRoot ('tray-' + $PID + '-error.log')
-function Call-Local([string]$Path,[string]$Method='GET') {
+function Call-Local([string]$Path,[string]$Method='GET',$Body=$null) {
   if (-not $script:Address) { throw 'The local server is not ready.' }
   $parameters = @{Uri=($script:Address + $Path);Method=$Method;Headers=$script:Headers;TimeoutSec=8;UseBasicParsing=$true}
-  if ($Method -ne 'GET') { $parameters.ContentType='application/json'; $parameters.Body='{}' }
+  if ($Method -ne 'GET') { $parameters.ContentType='application/json; charset=utf-8'; $parameters.Body=if($null -ne $Body){$Body|ConvertTo-Json -Depth 6 -Compress}else{'{}'} }
   return Invoke-RestMethod @parameters
 }
 function Stop-OwnServer {
@@ -32,7 +32,7 @@ function Stop-OwnServer {
 }
 $script:AppWindow=$null
 function Open-Dideban {
-  if (-not $script:Address) { $script:Icon.ShowBalloonTip(4000,'Dideban','Preparing your archive. Please wait.',[Windows.Forms.ToolTipIcon]::Info); return }
+  if (-not $script:Address) { $script:Icon.ShowBalloonTip(4000,'Khabarnama','Preparing your archive. Please wait.',[Windows.Forms.ToolTipIcon]::Info); return }
   if ($script:AppWindow -and -not $script:AppWindow.IsDisposed) { $script:AppWindow.Show(); $script:AppWindow.WindowState='Normal'; $script:AppWindow.Activate(); return }
   try {
     $library=Join-Path $PSScriptRoot 'webview2'
@@ -42,7 +42,7 @@ function Open-Dideban {
     $runtime=[Microsoft.Web.WebView2.Core.CoreWebView2Environment]::GetAvailableBrowserVersionString()
     if (-not $runtime) { throw 'Microsoft WebView2 Runtime is not installed.' }
     $script:AppWindow=New-Object Windows.Forms.Form
-    $script:AppWindow.Text='Dideban'; $script:AppWindow.Width=1280; $script:AppWindow.Height=850
+    $script:AppWindow.Text='Khabarnama — خبرنما'; $script:AppWindow.Icon=New-Object Drawing.Icon -ArgumentList (Join-Path $PSScriptRoot 'khabarnama.ico'); $script:AppWindow.Width=1280; $script:AppWindow.Height=850
     $script:AppWindow.MinimumSize=New-Object Drawing.Size(800,600)
     $view=New-Object Microsoft.Web.WebView2.WinForms.WebView2
     $properties=New-Object Microsoft.Web.WebView2.WinForms.CoreWebView2CreationProperties
@@ -50,7 +50,7 @@ function Open-Dideban {
     $view.CreationProperties=$properties; $view.Dock='Fill'
     $view.Add_CoreWebView2InitializationCompleted({
       param($sender,$eventArgs)
-      if (-not $eventArgs.IsSuccess) { [Windows.Forms.MessageBox]::Show('WebView2 could not initialize. Install the Microsoft WebView2 Evergreen Runtime.','Dideban') | Out-Null; return }
+      if (-not $eventArgs.IsSuccess) { [Windows.Forms.MessageBox]::Show('WebView2 could not initialize. Install the Microsoft WebView2 Evergreen Runtime.','Khabarnama') | Out-Null; return }
       $sender.CoreWebView2.Add_NewWindowRequested({param($web,$webEvent);$webEvent.Handled=$true;$uri=[Uri]$webEvent.Uri;if($uri.Scheme -in @('https','http')){Start-Process $uri.AbsoluteUri}})
       $sender.CoreWebView2.Add_NavigationStarting({param($web,$webEvent);$uri=[Uri]$webEvent.Uri;if($uri.Scheme -in @('https','http') -and $uri.Authority -ne ([Uri]$script:Address).Authority){$webEvent.Cancel=$true;Start-Process $uri.AbsoluteUri}})
     })
@@ -61,7 +61,7 @@ function Open-Dideban {
   } catch {
     $edge=Join-Path ${env:ProgramFiles(x86)} 'Microsoft\Edge\Application\msedge.exe'
     if(Test-Path $edge){Start-Process -FilePath $edge -ArgumentList ('--app="' + $script:Address + '"'),('--user-data-dir="' + (Join-Path $script:DataRoot 'edge-app-profile') + '"')}
-    else{[Windows.Forms.MessageBox]::Show('Install Microsoft WebView2 Evergreen Runtime from https://developer.microsoft.com/microsoft-edge/webview2/ and open Dideban again.','Dideban') | Out-Null}
+    else{[Windows.Forms.MessageBox]::Show('Install Microsoft WebView2 Evergreen Runtime from https://developer.microsoft.com/microsoft-edge/webview2/ and open Khabarnama again.','Khabarnama') | Out-Null}
   }
 }
 function Install-PreparedUpdate {
@@ -76,13 +76,14 @@ function Install-PreparedUpdate {
     $script:Mutex.ReleaseMutex(); $script:OwnsMutex=$false
     Start-Process -FilePath $file -ArgumentList '/S' -WorkingDirectory $script:AppRoot
     $script:Icon.Visible = $false; [Windows.Forms.Application]::ExitThread()
-  } catch { $script:Updating=$false; $script:Icon.ShowBalloonTip(5000,'Dideban update',('Update postponed: ' + $_.Exception.Message),[Windows.Forms.ToolTipIcon]::Warning) }
+  } catch { $script:Updating=$false; $script:Icon.ShowBalloonTip(5000,'Khabarnama update',('Update postponed: ' + $_.Exception.Message),[Windows.Forms.ToolTipIcon]::Warning) }
 }
+. (Join-Path $PSScriptRoot 'reader.ps1')
 $script:Icon = New-Object Windows.Forms.NotifyIcon
-$script:Icon.Icon = [Drawing.SystemIcons]::Application
-$script:Icon.Text = 'Dideban - preparing archive'; $script:Icon.Visible = $true
+$script:Icon.Icon = New-Object Drawing.Icon -ArgumentList (Join-Path $PSScriptRoot 'khabarnama.ico')
+$script:Icon.Text = 'Khabarnama - preparing archive'; $script:Icon.Visible = $true
 $menu = New-Object Windows.Forms.ContextMenuStrip
-$open = $menu.Items.Add('Open Dideban'); $open.Add_Click({Open-Dideban})
+$open = $menu.Items.Add('Open Khabarnama'); $open.Add_Click({Open-Dideban})
 $script:Startup = New-Object Windows.Forms.ToolStripMenuItem('Start with Windows')
 $script:Startup.CheckOnClick = $true
 $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
@@ -94,37 +95,39 @@ $script:Startup.Add_Click({
       $command = if (Test-Path -LiteralPath $stableStart) { 'wscript.exe "' + $stableStart + '"' } else { 'powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "' + $PSCommandPath + '"' }
       New-Item -Path $runKey -Force | Out-Null; New-ItemProperty -Path $runKey -Name 'Dideban' -Value $command -PropertyType String -Force | Out-Null
     } else { Remove-ItemProperty -Path $runKey -Name 'Dideban' -ErrorAction SilentlyContinue }
-  } catch { [Windows.Forms.MessageBox]::Show($_.Exception.Message,'Dideban startup') | Out-Null }
+  } catch { [Windows.Forms.MessageBox]::Show($_.Exception.Message,'Khabarnama startup') | Out-Null }
 })
 $menu.Items.Add($script:Startup) | Out-Null
 $script:InstallMenu = $menu.Items.Add('Install verified update'); $script:InstallMenu.Enabled=$false; $script:InstallMenu.Add_Click({Install-PreparedUpdate})
 $logs = $menu.Items.Add('Open data and logs'); $logs.Add_Click({Start-Process $script:DataRoot})
-$quit = $menu.Items.Add('Quit Dideban'); $quit.Add_Click({$script:Icon.Visible=$false;[Windows.Forms.Application]::ExitThread()})
+$quit = $menu.Items.Add('Quit Khabarnama'); $quit.Add_Click({$script:Icon.Visible=$false;[Windows.Forms.Application]::ExitThread()})
 $script:Icon.ContextMenuStrip=$menu; $script:Icon.Add_DoubleClick({Open-Dideban})
 $timer=New-Object Windows.Forms.Timer; $timer.Interval=2000
 $script:StartedAt=[DateTime]::UtcNow; $script:LastStatus=[DateTime]::MinValue
 $timer.Add_Tick({
   try {
-    if ($script:Node.HasExited) { $timer.Stop(); $script:Icon.Text='Dideban - stopped'; [Windows.Forms.MessageBox]::Show(('Dideban stopped. See ' + $script:Stderr),'Dideban') | Out-Null; [Windows.Forms.Application]::ExitThread(); return }
+    if ($script:Node.HasExited) { $timer.Stop(); $script:Icon.Text='Khabarnama - stopped'; [Windows.Forms.MessageBox]::Show(('Khabarnama stopped. See ' + $script:Stderr),'Khabarnama') | Out-Null; [Windows.Forms.Application]::ExitThread(); return }
     if (-not $script:Address) {
       $text = Get-Content -LiteralPath $script:Stdout -Raw -ErrorAction SilentlyContinue
       if ($text -match 'Didban API listening on 127\.0\.0\.1:(\d+)') {
         $script:Address='http://127.0.0.1:' + $Matches[1]
         $health=Call-Local '/api/health'
         if ($health.status -ne 'ok') { throw 'Startup verification failed.' }
-        $script:Icon.Text='Dideban - collecting news'; Open-Dideban
+        $script:Icon.Text='Khabarnama - collecting news'; Open-Dideban
       } elseif (([DateTime]::UtcNow-$script:StartedAt).TotalMinutes -gt 5) { throw 'Archive preparation took too long. Check the log.' }
       return
     }
+    $readerStatus=Call-Local '/api/desktop/reader/next'
+    if($readerStatus.job){Open-SocialReader $readerStatus.job}
     if (([DateTime]::UtcNow-$script:LastStatus).TotalSeconds -lt 30) { return }
     $script:LastStatus=[DateTime]::UtcNow
     $status=Call-Local '/api/desktop/status'; $script:InstallMenu.Enabled=[bool]$status.ready
-    if ($status.ready -and $status.preparedVersion -ne $script:ReadyNotice) { $script:ReadyNotice=$status.preparedVersion; $script:Icon.ShowBalloonTip(6000,'Dideban update','A verified update is ready. Use the tray menu to install it.',[Windows.Forms.ToolTipIcon]::Info) }
+    if ($status.ready -and $status.preparedVersion -ne $script:ReadyNotice) { $script:ReadyNotice=$status.preparedVersion; $script:Icon.ShowBalloonTip(6000,'Khabarnama update','A verified update is ready. Use the tray menu to install it.',[Windows.Forms.ToolTipIcon]::Info) }
     if ($status.ready -and $status.preferences.autoUpdate) { Install-PreparedUpdate }
-  } catch { $script:Icon.Text='Dideban - check data and logs' }
+  } catch { $script:Icon.Text='Khabarnama - check data and logs' }
 })
 try {
   $script:Node=Start-Process -FilePath (Join-Path $script:AppRoot 'runtime\node.exe') -ArgumentList '--env-file-if-exists=.env','server/index.mjs' -WorkingDirectory $script:AppRoot -WindowStyle Hidden -PassThru -RedirectStandardOutput $script:Stdout -RedirectStandardError $script:Stderr
   $timer.Start(); [Windows.Forms.Application]::Run()
-} catch { [Windows.Forms.MessageBox]::Show($_.Exception.Message,'Dideban') | Out-Null }
+} catch { [Windows.Forms.MessageBox]::Show($_.Exception.Message,'Khabarnama') | Out-Null }
 finally { $timer.Stop(); Stop-OwnServer; $script:Icon.Dispose(); if($script:OwnsMutex){$script:Mutex.ReleaseMutex()}; $script:Mutex.Dispose() }

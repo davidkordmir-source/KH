@@ -13,6 +13,6 @@ test('blocked browser storage and missing optional Intl support cannot blank the
 test('an unavailable app module produces a recovery screen instead of an empty page',async({page})=>{
   await page.route('**/src/App.tsx*',route=>route.abort());
   await page.goto('/');
-  await expect(page.getByRole('alert')).toContainText('اجرای رابط دیدبان ممکن نشد');
+  await expect(page.getByRole('alert')).toContainText('اجرای رابط خبرنما ممکن نشد');
   await expect(page.getByRole('button',{name:'تلاش دوباره',exact:true})).toBeVisible();
 });

@@ -7,7 +7,7 @@ export function archiveFilters(query,dateBound) {
   const from=dateBound(query.dateFrom),to=dateBound(query.dateTo,true);
   if(from&&to&&from>to)throw new Error('ابتدای بازه باید پیش از انتهای آن باشد.');
   const country=text(query.country,2);if(country&&!/^[a-z]{2}$/i.test(country))throw new Error('کد کشور معتبر نیست.');
-  return {query:text(query.query),exclude:text(query.exclude),country,city:text(query.city,100),sourceId:text(query.sourceId,100),language:text(query.language,20),category:text(query.category,30),folder:text(query.folder,100),dateFrom:from,dateTo:to,hasMedia:query.hasMedia==='true',savedOnly:query.savedOnly==='true',...(query.read==='true'||query.read==='false'?{read:query.read==='true'}:{})};
+  return {query:text(query.query),exclude:text(query.exclude),country,city:text(query.city,100),sourceId:text(query.sourceId,100),language:text(query.language,20),category:text(query.category,100),folder:text(query.folder,100),dateFrom:from,dateTo:to,hasMedia:query.hasMedia==='true',savedOnly:query.savedOnly==='true',...(query.read==='true'||query.read==='false'?{read:query.read==='true'}:{})};
 }
 const csvCell=value=>{let content=String(value??'');if(/^[\s]*[=+\-@]/.test(content))content=`'${content}`;return `"${content.replaceAll('"','""')}"`;};
 export function registerNewsroomRoutes({app,store,newsroom,backups,dateBound,fetcher,isSyncing}) {

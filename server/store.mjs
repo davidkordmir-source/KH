@@ -168,6 +168,7 @@ export class Store {
         const article = enrichArticle({ ...input, id });
         if (previous) {
           const old = JSON.parse(previous.payload);
+          if(old.userCategory){article.originalCategory=article.category;article.userCategory=old.userCategory;article.category=old.userCategory;}
           if (old.title !== article.title || (old.fullText || old.summary) !== (article.fullText || article.summary)) {
             this.db.prepare('INSERT INTO article_versions(article_id,title,body,captured_at) VALUES(?,?,?,?)').run(id, old.title, old.fullText || old.summary || '', new Date().toISOString());
           }

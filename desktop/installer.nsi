@@ -10,7 +10,8 @@ Unicode true
 !ifndef OUTPUT
   !error "OUTPUT is required"
 !endif
-Name "Dideban ${VERSION}"
+Name "Khabarnama ${VERSION}"
+Icon "khabarnama.ico"
 OutFile "${OUTPUT}"
 InstallDir "$LOCALAPPDATA\Programs\Dideban"
 InstallDirRegKey HKCU "Software\Dideban" "InstallDir"
@@ -18,18 +19,18 @@ RequestExecutionLevel user
 SetCompressor /SOLID lzma
 SetCompressorDictSize 32
 VIProductVersion "${VERSION}.0"
-VIAddVersionKey "ProductName" "Dideban Newsroom"
-VIAddVersionKey "FileDescription" "Dideban per-user Windows installer"
+VIAddVersionKey "ProductName" "Khabarnama Newsroom"
+VIAddVersionKey "FileDescription" "Khabarnama per-user Windows installer"
 VIAddVersionKey "FileVersion" "${VERSION}"
 VIAddVersionKey "ProductVersion" "${VERSION}"
-VIAddVersionKey "LegalCopyright" "Dideban project contributors"
+VIAddVersionKey "LegalCopyright" "Khabarnama project contributors"
 !define MUI_ABORTWARNING
 !insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_INSTFILES
 !define MUI_FINISHPAGE_RUN "$INSTDIR\start.vbs"
 !define MUI_FINISHPAGE_RUN_FUNCTION LaunchDideban
-!define MUI_FINISHPAGE_RUN_TEXT "اجرای دیدبان کنار ساعت ویندوز"
+!define MUI_FINISHPAGE_RUN_TEXT "اجرای خبرنما کنار ساعت ویندوز"
 !insertmacro MUI_PAGE_FINISH
 !insertmacro MUI_UNPAGE_CONFIRM
 !insertmacro MUI_UNPAGE_INSTFILES
@@ -43,12 +44,12 @@ Function .onInit
     Pop $1
     System::Call 'kernel32::CloseHandle(p r0)'
     ${If} $1 = 183
-      MessageBox MB_RETRYCANCEL|MB_ICONINFORMATION "دیدبان در حال اجراست. از آیکون کنار ساعت، Quit Dideban را بزنید و سپس Retry را انتخاب کنید." IDRETRY checkRunning
+      MessageBox MB_RETRYCANCEL|MB_ICONINFORMATION "خبرنما در حال اجراست. از آیکون کنار ساعت، Quit Dideban یا Quit Khabarnama را بزنید و سپس Retry را انتخاب کنید." IDRETRY checkRunning
       Abort
     ${EndIf}
 FunctionEnd
 
-Section "Dideban"
+Section "Khabarnama"
   SetShellVarContext current
   SetOutPath "$INSTDIR\versions\${VERSION}"
   File /r "${PAYLOAD}\*.*"
@@ -61,16 +62,19 @@ Section "Dideban"
   FileWrite $0 "${VERSION}"
   FileClose $0
   WriteRegStr HKCU "Software\Dideban" "InstallDir" "$INSTDIR"
-  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Dideban" "DisplayName" "Dideban Newsroom"
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Dideban" "DisplayName" "Khabarnama — خبرنما"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Dideban" "DisplayVersion" "${VERSION}"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Dideban" "InstallLocation" "$INSTDIR"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Dideban" "UninstallString" '"$INSTDIR\uninstall.exe"'
   WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Dideban" "NoModify" 1
   WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Dideban" "NoRepair" 1
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Dideban" "DisplayIcon" "$INSTDIR\versions\${VERSION}\desktop\khabarnama.ico"
   WriteUninstaller "$INSTDIR\uninstall.exe"
+  Delete "$DESKTOP\Dideban.lnk"
+  Delete "$SMPROGRAMS\Dideban\Dideban.lnk"
   CreateDirectory "$SMPROGRAMS\Dideban"
-  CreateShortCut "$SMPROGRAMS\Dideban\Dideban.lnk" "$WINDIR\System32\wscript.exe" '"$INSTDIR\start.vbs"'
-  CreateShortCut "$DESKTOP\Dideban.lnk" "$WINDIR\System32\wscript.exe" '"$INSTDIR\start.vbs"'
+  CreateShortCut "$SMPROGRAMS\Dideban\Khabarnama.lnk" "$WINDIR\System32\wscript.exe" '"$INSTDIR\start.vbs"' "$INSTDIR\versions\${VERSION}\desktop\khabarnama.ico"
+  CreateShortCut "$DESKTOP\Khabarnama.lnk" "$WINDIR\System32\wscript.exe" '"$INSTDIR\start.vbs"' "$INSTDIR\versions\${VERSION}\desktop\khabarnama.ico"
 SectionEnd
 
 Function LaunchDideban
@@ -88,7 +92,7 @@ Function un.onInit
   Pop $1
   System::Call 'kernel32::CloseHandle(p r0)'
   StrCmp $1 183 0 done
-    MessageBox MB_OK "Close Dideban from its tray menu before uninstalling."
+    MessageBox MB_OK "Close Khabarnama from its tray menu before uninstalling."
     Abort
   done:
 FunctionEnd
@@ -96,6 +100,8 @@ FunctionEnd
 Section "Uninstall"
   SetShellVarContext current
   Delete "$DESKTOP\Dideban.lnk"
+  Delete "$DESKTOP\Khabarnama.lnk"
+  Delete "$SMPROGRAMS\Dideban\Khabarnama.lnk"
   Delete "$SMPROGRAMS\Dideban\Dideban.lnk"
   RMDir "$SMPROGRAMS\Dideban"
   DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "Dideban"

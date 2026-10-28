@@ -2,11 +2,11 @@ import { useState } from 'react';
 import { Pause, Play, Radio } from 'lucide-react';
 import './news-ticker.css';
 
-type Story = {id:string; title:string;summary?:string;translatedTitle?:string; url:string; sourceName:string; publishedAt:string; publishedAtKnown?:boolean; priority?:number; breakingScore?:number; read?:boolean};
+type Story = {id:string; title:string;summary?:string;translatedTitle?:string; url:string; sourceName:string; publishedAt:string; publishedAtKnown?:boolean; priority?:number; category?:string;userCategory?:string|null; breakingScore?:number; read?:boolean};
 
 export default function NewsTicker({articles,onOpen}:{articles:Story[];onOpen:(article:Story)=>void}) {
   const [paused,setPaused]=useState(false);
-  const military=articles.filter(article=>/(?:حمله(?!\s*(?:قلبی|سایبری))|بمب|rocket|bombing|combat|ارتش|نیروهای مسلح|نظامی|موشک|جنگنده|پهپاد|رزمایش|تسلیحات|بمباران|آتش\s?بس|military|missile|armed forces|fighter jet|airstrike|air strike|troops|naval|warfare|\barmy\b|\bwar\b|جنگ(?:\s|$))/i.test(`${article.title} ${article.summary||''}`));
+  const military=articles.filter(article=>article.userCategory?article.userCategory==='military':article.category==='military'||/(?:حمله(?!\s*(?:قلبی|سایبری))|بمب|rocket|bombing|combat|ارتش|نیروهای مسلح|نظامی|موشک|جنگنده|پهپاد|رزمایش|تسلیحات|بمباران|آتش\s?بس|military|missile|armed forces|fighter jet|airstrike|air strike|troops|naval|warfare|\barmy\b|\bwar\b|جنگ(?:\s|$))/i.test(`${article.title} ${article.summary||''}`));
   const important=military.filter(article=>Number(article.priority||0)>=2 || (Number(article.breakingScore||0)>=55 && article.publishedAtKnown!==false && Date.parse(article.publishedAt)>=Date.now()-86400000));
   const stories=[...(military)].sort((a,b)=>Number(b.priority||0)-Number(a.priority||0) || (important.length?Number(b.breakingScore||0)-Number(a.breakingScore||0):0) || Date.parse(b.publishedAt)-Date.parse(a.publishedAt)).slice(0,50);
   const duration=Math.max(35,Math.min(1800,stories.reduce((sum,item)=>sum+item.title.length+item.sourceName.length,0)/8));

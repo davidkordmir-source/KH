@@ -34,7 +34,7 @@ const trimmed = (value, maximum = 200) => typeof value === 'string' ? value.trim
 const validCountry = value => !value || /^[A-Z]{2}$/.test(value);
 export function validateRule(input, previous) {
   const rule = { id: previous?.id || randomUUID(), name: trimmed(input.name,100), enabled: input.enabled !== false, type: input.type === 'market' ? 'market' : 'news',
-    query: trimmed(input.query,250), exclude:trimmed(input.exclude,250),language:trimmed(input.language,20),city:trimmed(input.city,100),country: trimmed(input.country,2).toUpperCase(), sourceId: trimmed(input.sourceId,100), category: trimmed(input.category,30),
+    query: trimmed(input.query,250), exclude:trimmed(input.exclude,250),language:trimmed(input.language,20),city:trimmed(input.city,100),country: trimmed(input.country,2).toUpperCase(), sourceId: trimmed(input.sourceId,100), category: trimmed(input.category,100),
     minimumPriority: Number(input.minimumPriority || 0), symbol: trimmed(input.symbol,20), threshold: Number(input.threshold || 0), condition: input.condition || 'change',
     since: previous?.since || new Date(Date.now() - (input.includeRecent ? 24*3600000 : 0)).toISOString(), createdAt: previous?.createdAt || new Date().toISOString() };
   if (!rule.name || !validCountry(rule.country) || !Number.isInteger(rule.minimumPriority) || rule.minimumPriority<0 || rule.minimumPriority>3) throw new Error('نام قانون، کشور یا اولویت معتبر نیست.');
@@ -154,7 +154,7 @@ export function createNewsroom({ store, markets, fetcher }) {
     const text=(original.fullText||original.summary||'').slice(0,14000),key=hash(`${original.id}|${original.title}|${text}|${target}`);
     const cached=store.db.prepare('SELECT payload FROM translations WHERE cache_key=?').get(googleCacheKey(original,target))||store.db.prepare('SELECT payload FROM translations WHERE cache_key=?').get(key);return cached?JSON.parse(cached.payload):null;
   }
-  function decorate(items){return items.map(item=>{const translated=item.language!=='fa'?cachedTranslation(item):null;return translated?{...item,translatedTitle:translated.title,translatedSummary:translated.body.slice(0,1000),translationProvider:translated.provider}:item;});}
+  function decorate(items){if(!store.db.prepare('SELECT 1 FROM translations LIMIT 1').get())return items;return items.map(item=>{const translated=item.language!=='fa'?cachedTranslation(item):null;return translated?{...item,translatedTitle:translated.title,translatedSummary:translated.body.slice(0,1000),translationProvider:translated.provider}:item;});}
   async function translateRecent(){
     if(!store.getConnection('translator'))return {translated:0,configured:false};let count=0;
     for(const item of store.articles({limit:100}).filter(a=>a.language!=='fa'&&!cachedTranslation(a)).slice(0,10)){await translate(item.id,'fa');count++;}

@@ -1,3 +1,6 @@
+import {registerHistoricalDigest} from './historical-digest.mjs';
+import {createPublicHistory} from './public-history.mjs';
+import {registerCategories,categoryList} from './categories.mjs';
 import express from 'express';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
@@ -52,6 +55,8 @@ export function createApp({ directory = path.resolve('.data'), distDirectory = p
     next();
   });
   const access=createAccess({store,...accessOptions});access.register(app);
+  registerCategories(app,store);
+  registerHistoricalDigest(app,{store,fetcher},route);
 
   async function requestJson(url, options = {}) {
     const body = await fetcher(url, { ...options, allowedHosts: options.allowedHosts || API_HOSTS, maxBytes: 3_000_000 });
@@ -62,11 +67,12 @@ export function createApp({ directory = path.resolve('.data'), distDirectory = p
   const newsroom = createNewsroom({store,markets,fetcher});
   const lab=createLab({store,fetcher,newsroom});
   const backups = createBackupService(store);
-  const desktop=createDesktop({store,fetcher,backups,isBusy:()=>Boolean(pendingSync)||lab.isBusy()});
+  const desktop=createDesktop({store,fetcher,backups,isBusy:()=>Boolean(pendingSync)||lab.isBusy()||publicHistory.isBusy()});
   const archive = createArchiveService({ store, fetcher });
+  const publicHistory=createPublicHistory({store,fetcher});
   const telegramMedia = createTelegramMediaService({ store, requestJson, fetchBinary: (url, options = {}) => fetcher(url, { ...options, responseType: 'buffer', allowedHosts: ['api.telegram.org'] }) });
   const customConnections = () => store.getSetting('customConnections', []);
-  const dashboard = () => {const data=store.dashboard();return { ...data,articles:newsroom.decorate(data.articles), customConnections: customConnections().map(({ id, type, label, description }) => ({ id, type, label, description, connected: true })) };};
+  const dashboard = () => {const data=store.dashboard();return { ...data,articles:newsroom.decorate(data.articles), categories:categoryList(store), customConnections: customConnections().map(({ id, type, label, description }) => ({ id, type, label, description, connected: true })) };};
 
   function dateBound(value, end = false) {
     if (!value) return undefined;
@@ -251,6 +257,7 @@ export function createApp({ directory = path.resolve('.data'), distDirectory = p
     res.json(await archive.connectGuardian(req.body.token));
   }));
   app.post('/api/archive/import', route(async (req, res) => res.json(await archive.importDay(req.body || {}))));
+  app.post('/api/archive/public-day',route(async(req,res)=>res.json(await publicHistory.importDay(req.body||{}))));
   app.post('/api/archive/import-range',route(async(req,res)=>res.json(await archive.importRange(req.body||{}))));
   app.get('/api/catalog', (_req, res) => res.json({ sources: SOURCE_CATALOG.map(source => ({ ...source, websiteUrl: OFFICIAL_WEBSITES[source.id] || source.url })) }));
   app.post('/api/catalog/:id/add', route(async (req, res) => {

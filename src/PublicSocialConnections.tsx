@@ -1,3 +1,4 @@
+import BrowserReader from './BrowserReader';
 import {useState,type FormEvent} from 'react';
 import {Check,ExternalLink,Link2,LoaderCircle,Plus,Trash2} from 'lucide-react';
 import {request} from './newsroom-client';
@@ -33,6 +34,6 @@ export default function PublicSocialConnections({sources,onChanged}:{sources:Sou
  </form>
  {error&&<p className="form-error" role="alert">{error}</p>}{notice&&<p className="wb-success" role="status"><Check size={15}/>{notice}</p>}
  <div className="custom-connection-list">{connected.map(source=><div className="catalog-row" key={source.id}><Link2 size={18}/><div><strong>{source.name}</strong><small>{source.lastError?source.lastError:!source.enabled?'دریافت متوقف است':source.lastFetchedAt?'دریافت عمومی موفق؛ بدون کلید':'در انتظار دریافت'}</small><a href={source.url} target="_blank" rel="noreferrer">صفحهٔ عمومی <ExternalLink size={12}/></a></div><button className="subtle-danger" disabled={busy} aria-label={`حذف منبع عمومی ${source.name}`} onClick={async()=>{setBusy(true);setError('');try{await request(`/sources/${source.id}`,'DELETE');await onChanged();}catch(e){setError((e as Error).message);}finally{setBusy(false);}}}><Trash2 size={16}/></button></div>)}</div>
- <div className="info-strip"><p>این روش ورود به حساب شخصی نیست. دسترسی شبکه به سایت لازم است و انتشار پست تازه ممکن است با تأخیر دیده شود. اینستاگرام و X آزمایشی‌اند: فقط داده‌ای دریافت می‌شود که بدون ورود در نمایش عمومی خود پلتفرم در دسترس باشد. ورود، کپچا و محدودیت دسترسی دور زده نمی‌شود. فیسبوک و لینکدین در این بخش پشتیبانی نمی‌شوند.</p></div>
+ <BrowserReader onChanged={onChanged}/><div className="info-strip"><p>این روش ورود به حساب شخصی نیست. دسترسی شبکه به سایت لازم است و انتشار پست تازه ممکن است با تأخیر دیده شود. اینستاگرام و X آزمایشی‌اند: فقط داده‌ای دریافت می‌شود که بدون ورود در نمایش عمومی خود پلتفرم در دسترس باشد. ورود، کپچا و محدودیت دسترسی دور زده نمی‌شود. فیسبوک و لینکدین در این بخش پشتیبانی نمی‌شوند.</p></div>
  </section>;
 }

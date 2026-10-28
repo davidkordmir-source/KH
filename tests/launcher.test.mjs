@@ -77,7 +77,7 @@ test('the launcher waits for its own child readiness and serves the built app fr
   assert.equal(health.storage, 'sqlite');
   const response = await fetch(`http://127.0.0.1:${port}`);
   assert.equal(response.status, 200);
-  assert.match(await response.text(), /دیدبان/);
+  assert.match(await response.text(), /خبرنما/);
   const dashboard = await (await fetch(`http://127.0.0.1:${port}/api/dashboard`)).json();
   assert.equal(dashboard.articles.length, 0);
   assert.equal(dashboard.sources.filter(source => source.enabled).length, 4);

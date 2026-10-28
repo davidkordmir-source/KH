@@ -47,6 +47,8 @@ export function discoverFeedUrl(html, websiteUrl) {
 export function categoryFor(value) {
   const input = value.toLowerCase();
   const groups = [
+    ['military', /نظامی|ارتش|نیروهای مسلح|موشک|جنگنده|پهپاد|بمباران|رزمایش|military|missile|airstrike|armed forces|fighter jet|\barmy\b/i],
+    ['social', /اجتماعی|آموزش|دانش‌آموز|بازنشست|بیکاری|رفاه|مهاجرت|حقوق بشر|human rights|education|unemployment|migration|social affairs/i],
     ['technology', /technology|artificial intelligence|\bai\b|cyber|تکنولوژی|فناوری|هوش مصنوعی|اینترنت|دیجیتال/],
     ['economy', /econom|financ|inflation|stock|oil price|اقتصاد|تورم|بورس|دلار|سرمایه|قیمت نفت/],
     ['sports', /sport|football|soccer|olympic|ورزش|فوتبال|المپیک|جام جهانی/],
