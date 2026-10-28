@@ -142,6 +142,8 @@ export class Store {
     if (typeof patch.enabled === 'boolean') add('enabled', Number(patch.enabled));
     if (Number.isInteger(patch.priority) && patch.priority >= 0 && patch.priority <= 3) add('priority', patch.priority);
     if (['news', 'official', 'social'].includes(patch.kind)) add('kind', patch.kind);
+    if(typeof patch.platform==='string'&&/^[a-z0-9_-]{1,30}$/i.test(patch.platform))add('platform',patch.platform);
+    if(typeof patch.url==='string'&&patch.url.length<=2048){const url=new URL(patch.url);if(url.protocol!=='https:'||url.username||url.password)throw new Error('نشانی منبع معتبر نیست.');add('url',url.href);}
     if (typeof patch.name === 'string' && patch.name.trim()) add('name', patch.name.trim().slice(0, 100));
     if (Object.hasOwn(patch, 'iconUrl')) add('icon_url', safeIcon(patch.iconUrl));
     if (typeof patch.countryCode === 'string' && /^[A-Za-z]{2}$/.test(patch.countryCode)) add('country_code', patch.countryCode.toUpperCase());

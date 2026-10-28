@@ -38,8 +38,8 @@ test('official website references cannot be misreported as active feed connectio
   for (const code of ['US','GB','IL','RU','CN']) assert.ok(catalog.sources.some(item=>item.kind==='official'&&item.countryCode===code));
   assert.equal(catalog.sources.find(item=>item.id==='kremlin').websiteUrl,'https://en.kremlin.ru/events/president/news');
   const response=await request('/api/catalog/israel-prime-minister/add','POST',{});
-  assert.equal(response.status,422);assert.equal(reads,0);
-  assert.match((await response.json()).error,/وب‌سایت رسمی/);
+  assert.equal(response.status,201);assert.equal(reads,0);
+  const registered=(await response.json()).source;assert.equal(registered.platform,'website-link');assert.equal(registered.enabled,false);assert.equal(registered.lastFetchedAt,null);
 });
 
 test('saved API returns authoritative canonical records and honors unsaving after ingestion', async t => {

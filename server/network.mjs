@@ -85,7 +85,7 @@ export async function safeFetch(value, { method = 'GET', headers = {}, body, max
     const { dispatcher, close } = createDispatcher(addresses);
     try {
       const response = await fetch(url, {
-        dispatcher, redirect: 'manual', method, headers: { 'User-Agent': 'DidbanNews/1.0 (RSS Reader)', ...headers }, body,
+        dispatcher, redirect: 'manual', method, headers: { 'User-Agent': 'Khabarnama/0.7.1 (Personal news reader)', Accept:'*/*', ...headers }, body,
         signal: AbortSignal.timeout(timeoutMs),
       });
       if ([301, 302, 303, 307, 308].includes(response.status)) {
@@ -98,7 +98,7 @@ export async function safeFetch(value, { method = 'GET', headers = {}, body, max
       }
       if (!response.ok) {
         await response.body?.cancel();
-        throw new Error(`پاسخ سرویس: HTTP ${response.status}. دسترسی شبکه یا سطح دسترسی حساب را بررسی کنید.`);
+        throw Object.assign(new Error(response.status===403?'پاسخ سرویس: HTTP 403. سایت یا شبکه دریافت این درخواست را رد کرده است.':`پاسخ سرویس: HTTP ${response.status}. دسترسی شبکه یا مجوز سرویس را بررسی کنید.`),{status:502,upstreamStatus:response.status,code:response.status===403?'UPSTREAM_FORBIDDEN':'UPSTREAM_HTTP_ERROR'});
       }
       if (Number(response.headers.get('content-length')) > maxBytes) {
         await response.body?.cancel();
@@ -115,6 +115,7 @@ export async function safeFetch(value, { method = 'GET', headers = {}, body, max
       return responseType === 'buffer' ? result : result.toString('utf8');
     } catch (error) {
       if (error.name === 'TimeoutError' || error.name === 'AbortError') throw new Error('زمان انتظار برای پاسخ منبع به پایان رسید.');
+      if(error.message==='fetch failed'&&/proxy.*403|403.*proxy|tunnel.*403/i.test(String(error.cause?.message||'')))throw Object.assign(new Error('پراکسی یا شبکه، دسترسی به مقصد را رد کرده است (HTTP 403). تنظیم شبکه را بررسی کنید؛ دریافت از این مقصد تأیید نشده است.'),{status:502,code:'PROXY_ACCESS_DENIED'});
       if (error.message === 'fetch failed') throw new Error('اتصال به منبع برقرار نشد؛ دسترسی شبکه را بررسی کنید.');
       throw error;
     } finally {

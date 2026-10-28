@@ -1,7 +1,7 @@
 ﻿# A user-operated web reader. Only explicit text selection is sent to localhost.
 $script:ReaderWindow=$null; $script:ReaderView=$null; $script:ReaderJob=$null; $script:ReaderCapturePending=$false
 function Test-ReaderAddress([string]$Value) {
-  try { $uri=[Uri]$Value; return $uri.Scheme -eq 'https' -and $uri.Host -in @('instagram.com','www.instagram.com','x.com','www.x.com','twitter.com','www.twitter.com') } catch { return $false }
+  try { $uri=[Uri]$Value; return $uri.Scheme -eq 'https' -and $uri.Port -eq 443 -and $uri.Host -in @('instagram.com','www.instagram.com','x.com','www.x.com','twitter.com','www.twitter.com','www.president.gov.ua','www.gov.uk','www.whitehouse.gov','www.state.gov','www.defense.gov','home.treasury.gov','en.kremlin.ru','mid.ru','www.fmprc.gov.cn','english.www.gov.cn','www.gov.il','president.ir','mfa.gov.ir','www.elysee.fr','www.bundesregierung.de','www.pmindia.gov.in','www.tccb.gov.tr','japan.kantei.go.jp','www.nato.int','www.un.org','news.un.org','www.consilium.europa.eu') } catch { return $false }
 }
 function Open-SocialReader($Job) {
   if (-not (Test-ReaderAddress $Job.url)) { return }
@@ -18,7 +18,7 @@ function Open-SocialReader($Job) {
     $properties.UserDataFolder=Join-Path $script:DataRoot 'social-reader-profile'; $script:ReaderView.CreationProperties=$properties; $script:ReaderView.Dock='Fill'
     $bar=New-Object Windows.Forms.FlowLayoutPanel; $bar.Dock='Top'; $bar.Height=56; $bar.RightToLeft='Yes'
     $capture=New-Object Windows.Forms.Button; $capture.Text='دریافت متن انتخاب‌شده'; $capture.AutoSize=$true; $capture.Height=38
-    $instruction=New-Object Windows.Forms.Label; $instruction.Text='یک پست عمومی را باز کنید، متن آن را انتخاب کنید، سپس دکمه را بزنید. ورود را خودتان در سایت رسمی انجام دهید.'; $instruction.AutoSize=$true
+    $instruction=New-Object Windows.Forms.Label; $instruction.Text='یک پست عمومی یا سخنرانی رسمی را باز کنید، متن آن را انتخاب کنید، سپس دکمه را بزنید. ورود را خودتان در سایت رسمی انجام دهید.'; $instruction.AutoSize=$true
     $bar.Controls.Add($capture); $bar.Controls.Add($instruction)
     $script:ReaderView.Add_CoreWebView2InitializationCompleted({param($sender,$eventArgs)
       if(-not $eventArgs.IsSuccess){[Windows.Forms.MessageBox]::Show('WebView2 could not initialize. Use manual link and text import.','Khabarnama')|Out-Null;return}

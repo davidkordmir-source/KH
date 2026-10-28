@@ -1,3 +1,4 @@
+import {knownFeedUrl,sourceAccessError} from './source-access.mjs';
 import {registerHistoricalDigest} from './historical-digest.mjs';
 import {createPublicHistory} from './public-history.mjs';
 import {registerCategories,categoryList} from './categories.mjs';
@@ -24,6 +25,7 @@ import { createDesktop } from './desktop.mjs';
 
 const API_HOSTS = ['api.telegram.org', 'api.x.com', 'api.twitter.com', 'graph.facebook.com', 'graph.instagram.com', 'api.linkedin.com'];
 const idFor = value => createHash('sha256').update(value).digest('hex').slice(0, 24);
+const SOURCE_HEADERS={Accept:'application/rss+xml, application/atom+xml, application/xml;q=0.9, text/html;q=0.8, */*;q=0.5'};
 const publicError = error => String(error.message || 'خطای غیرمنتظره رخ داد.').slice(0, 400);
 const route = handler => (req, res, next) => Promise.resolve(handler(req, res)).catch(next);
 
@@ -109,12 +111,14 @@ export function createApp({ directory = path.resolve('.data'), distDirectory = p
 
   async function checkedSource(rawUrl, name, mode = 'auto') {
     const { url } = await urlValidator(rawUrl);
+    if(mode==='pending')return {url:url.href,platform:'auto',articles:[]};
     if (mode === 'link') return {url:url.href,platform:'website-link',articles:[]};
     if(url.hostname==='t.me') {const spec=await publicSourceSpec('telegram',url.href,fetcher);return {...spec,articles:await collectPublicSource({...spec,id:'validation',name},fetcher)};}
     const socialType=['instagram.com','www.instagram.com'].includes(url.hostname)?'instagram':['x.com','www.x.com','twitter.com','www.twitter.com'].includes(url.hostname)?'x':null;
     if(socialType){const spec=await publicSourceSpec(socialType,url.href,fetcher);return {...spec,articles:await collectPublicSource({...spec,id:'validation',name},fetcher)};}
-    let feedUrl = url.href;
-    let contents = await fetcher(feedUrl);
+    let feedUrl = knownFeedUrl(url.href)||url.href;
+    if(feedUrl!==url.href)await urlValidator(feedUrl);
+    let contents = await fetcher(feedUrl,{headers:SOURCE_HEADERS});
     if (/<!doctype\s+html|<html[\s>]/i.test(contents)) {
       const discovered = discoverFeedUrl(contents, feedUrl);
       if (!discovered) {
@@ -122,13 +126,13 @@ export function createApp({ directory = path.resolve('.data'), distDirectory = p
         return {url:feedUrl,platform:'website',articles:result.articles};
       }
       feedUrl = (await urlValidator(discovered)).url.href;
-      contents = await fetcher(feedUrl);
+      contents = await fetcher(feedUrl,{headers:SOURCE_HEADERS});
     }
     return {url:feedUrl,platform:'rss',articles:parseFeed(contents,{id:'validation',name,url:feedUrl})};
   }
   function saveInitialArticles(source, articles) {
     store.addArticles(articles.map(article=>({...article,sourceId:source.id,sourceName:source.name,platform:source.platform.replace(/-public$/,''),sourceKind:source.kind,sourcePriority:source.priority||0})));
-    if (source.platform !== 'website-link') store.markSource(source.id);
+    if (!['auto','website-link'].includes(source.platform)) store.markSource(source.id);
   }
 
   function normalizeCollected(items, platform) {
@@ -196,11 +200,13 @@ export function createApp({ directory = path.resolve('.data'), distDirectory = p
       const sources = store.sources().filter(source => source.enabled && source.platform !== 'website-link');
       await Promise.all(sources.map(async source => {
         try {
-          const items = ['telegram-public','youtube-public','mastodon-public','instagram-public','x-public'].includes(source.platform) ? await collectPublicSource(source,fetcher) : source.platform === 'website' ? (await collectWebsite(source,{fetcher,urlValidator})).articles : parseFeed(await fetcher(source.url),source);
+          let items;
+          if(source.platform==='auto'){const checked=await checkedSource(source.url,source.name);store.updateSource(source.id,{url:checked.url,platform:checked.platform});items=checked.articles.map(article=>({...article,sourceId:source.id,sourceName:source.name,platform:checked.platform.replace(/-public$/,'')}));}
+          else items = ['telegram-public','youtube-public','mastodon-public','instagram-public','x-public'].includes(source.platform) ? await collectPublicSource(source,fetcher) : source.platform === 'website' ? (await collectWebsite(source,{fetcher,urlValidator})).articles : parseFeed(await fetcher(source.url,{headers:SOURCE_HEADERS}),source);
           store.addArticles(items.map(article => ({ ...article, sourceKind: source.kind, sourceIconUrl: article.sourceIconUrl || source.iconUrl, sourcePriority: source.priority || 0 })));
           store.markSource(source.id);
         } catch (error) {
-          const message = publicError(error);
+          const message = publicError(sourceAccessError(error));
           store.markSource(source.id, message);
           errors.push({ sourceId: source.id, sourceName: source.name, message });
         }
@@ -263,8 +269,16 @@ export function createApp({ directory = path.resolve('.data'), distDirectory = p
   app.post('/api/catalog/:id/add', route(async (req, res) => {
     const entry = SOURCE_CATALOG.find(item => item.id === req.params.id);
     if (!entry) return res.status(404).json({ error: 'منبع در فهرست وجود ندارد.' });
-    if (entry.collection === 'website') return res.status(422).json({ error: 'این مورد پیوند وب‌سایت رسمی است و اتصال خودکار فید برای آن فعال نیست. از «مشاهدهٔ سایت رسمی» استفاده کنید.' });
-    const checked = await checkedSource(entry.url, entry.name);
+    const mode=req.body?.mode??(entry.collection==='website'?'link':'auto');
+    if(!['auto','link','pending'].includes(mode))return res.status(400).json({error:'روش افزودن معتبر نیست.'});
+    if(mode==='link'||mode==='pending'){
+      const existing=store.sources().find(source=>source.url===entry.url);
+      if(existing){if(mode==='pending'){store.updateSource(existing.id,{platform:'auto',enabled:true});}return res.json({source:store.sources().find(s=>s.id===existing.id),alreadyExists:true});}
+      if(store.sources().length>=100)return res.status(400).json({error:'حداکثر صد منبع قابل ثبت است.'});
+      const source=store.addSource({...entry,platform:mode==='link'?'website-link':'auto',enabled:mode==='pending'});
+      return res.status(201).json({source:store.sources().find(s=>s.id===source.id),collectionVerified:false});
+    }
+    const checked = await checkedSource(entry.url, entry.name).catch(error=>{throw sourceAccessError(error);});
     const feedUrl = checked.url;
     const existing = store.sources().find(item => item.url === feedUrl || item.url === entry.url);
     if (existing) {
@@ -319,16 +333,21 @@ export function createApp({ directory = path.resolve('.data'), distDirectory = p
   }));
   app.post('/api/sources', route(async (req, res) => {
     const { name, url, mode = 'auto' } = req.body || {};
-    if (!['auto','link'].includes(mode)) return res.status(400).json({error:'روش افزودن منبع معتبر نیست.'});
+    if (!['auto','link','pending'].includes(mode)) return res.status(400).json({error:'روش افزودن منبع معتبر نیست.'});
     if (typeof name !== 'string' || !name.trim() || name.length > 100 || typeof url !== 'string' || url.length > 2048) return res.status(400).json({ error: 'نام و نشانی سایت یا RSS معتبر را وارد کنید.' });
     const metadata = sourceMetadata(req.body);
     if (store.sources().length >= 100) return res.status(400).json({ error: 'حداکثر صد منبع قابل ثبت است.' });
-    const checked = await checkedSource(url, name.trim(), mode);
+    const checked = await checkedSource(url, name.trim(), mode).catch(error=>{throw sourceAccessError(error);});
     const feedUrl = checked.url;
     if (store.sources().some(source => source.url === feedUrl)) return res.status(409).json({ error: 'این منبع قبلاً اضافه شده است.' });
     const source = store.addSource({ name: name.trim(), url: feedUrl, ...metadata, platform:checked.platform, enabled:mode !== 'link', iconUrl: `${new URL(feedUrl).origin}/favicon.ico` });
     saveInitialArticles(source,checked.articles);
     res.status(201).json(source);
+  }));
+  app.post('/api/sources/:id/retry',route(async(req,res)=>{
+    const source=store.sources().find(item=>item.id===req.params.id);if(!source)return res.status(404).json({error:'منبع پیدا نشد.'});
+    try{const checked=await checkedSource(source.url,source.name);store.updateSource(source.id,{url:checked.url,platform:checked.platform,enabled:true});const updated=store.sources().find(s=>s.id===source.id);saveInitialArticles(updated,checked.articles);res.json({source:store.sources().find(s=>s.id===source.id),imported:checked.articles.length});}
+    catch(error){const failure=sourceAccessError(error);store.markSource(source.id,publicError(failure));throw failure;}
   }));
   app.patch('/api/sources/:id', route(async (req, res) => {
     const metadata = sourceMetadata(req.body);
